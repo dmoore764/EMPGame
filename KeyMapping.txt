@@ -1,0 +1,17 @@
+KEY_Left		:		KB_LEFT
+KEY_Right		:		KB_RIGHT
+KEY_Up			:		KB_UP
+KEY_Down		:		KB_DOWN
+KEY_Action1		:		KB_Z
+KEY_Action2		:		KB_X
+KEY_Action3		:		KB_A
+KEY_Action4		:		KB_S
+KEY_Action5		:		KB_C
+KEY_Action6		:		KB_V
+KEY_Select		:		KB_TAB
+KEY_Start		:		KB_ENTER
+KEY_Shoulder1	:		KB_Q
+KEY_Shoulder2	:		KB_W
+KEY_Shoulder3	:		KB_E
+KEY_Shoulder4	:		KB_R
+KEY_Quit		:		KB_ESCAPE

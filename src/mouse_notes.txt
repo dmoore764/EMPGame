@@ -1,0 +1,3 @@
+Register with GUI system a collider, indicate if in world coords or gui coords, give a z-index
+
+GUI system sorts them, goes through the two lists and sends an event one by one, stops when the event is "handled"

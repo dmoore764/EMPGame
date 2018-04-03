@@ -1,0 +1,8 @@
+[
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking1" },
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking2" },
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking3" },
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking4" },
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking5" },
+	{ "time" : 0.1,		"sprite" : "SamuraiWalking6" },
+]

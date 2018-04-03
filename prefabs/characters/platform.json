@@ -1,0 +1,14 @@
+{
+	type : OBJ_PLATFORM,
+	components : [ MOVING_PLATFORM, TRANSFORM, PHYSICS, SPRITE ], 
+	data : {
+		moving_platform : {
+			bl : [-5120, 0],
+			ur : [5120,5120],
+		},
+		sprite : {
+			name : "Platform",
+			depth : 20,
+		},
+	}
+}

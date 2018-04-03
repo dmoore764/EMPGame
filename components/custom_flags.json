@@ -1,0 +1,6 @@
+{
+	name : CUSTOM_FLAGS,
+	serialized : {
+		bits : { type: uint32_t, default : 0 }
+	}
+}

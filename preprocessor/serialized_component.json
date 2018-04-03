@@ -1,0 +1,8 @@
+{
+    component_type: COMP_SPRITE,
+    textureName: "EnemyShip",
+    color: 4294967295,
+    offset: [10.000000, 20.000000],
+    boundingRadius: 8.000000,
+    blendMode: BLEND_MODE_ADD,
+}

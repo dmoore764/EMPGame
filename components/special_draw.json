@@ -1,0 +1,7 @@
+{
+	name : SPECIAL_DRAW,
+	nonSerialized : {
+		depth : { type : int, default: 0 },
+		draw : { type : "update_function *" }
+	}
+}

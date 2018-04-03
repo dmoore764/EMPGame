@@ -1,0 +1,7 @@
+[
+	{ "time" : 0.1,		"sprite" : "Asteroid_0" },
+	{ "time" : 0.1,		"sprite" : "Asteroid_1" },
+	{ "time" : 0.1,		"sprite" : "Asteroid_2" },
+	{ "time" : 0.1,		"sprite" : "Asteroid_3" },
+	{ "time" : 0.1,		"sprite" : "Asteroid_4" },
+]

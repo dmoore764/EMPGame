@@ -1,0 +1,8 @@
+{
+	name : SPRITE,
+	serialized : {
+		depth :			{ type : int, default: 0 },
+		name :			{ type : "char *" },
+		color :			{ type : uint32_t, default : 0xffffffff },
+	}
+}

@@ -1,0 +1,6 @@
+{
+	name : DIALOG,
+	nonSerialized : {
+		data :				{ type : "void *" },
+	}
+}

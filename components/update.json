@@ -1,0 +1,6 @@
+{
+	name : UPDATE,
+	nonSerialized : {
+		update : { type: "update_function *" }
+	}
+}

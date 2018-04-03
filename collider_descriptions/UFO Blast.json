@@ -1,0 +1,9 @@
+{
+	"collision mask": [
+		{
+			"type": "circle",
+			"radius": 16,
+			"center": [16, 15]
+		}
+	]
+}

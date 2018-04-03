@@ -1,0 +1,2 @@
+Town		loop		1.0		CHANNEL_MUSIC
+Snarl		no_loop		1.0		CHANNEL_EFFECTS

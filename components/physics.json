@@ -1,0 +1,7 @@
+{
+	name : PHYSICS,
+	serialized : {
+		vel : { type: ivec2 },
+		accel : { type: ivec2 },
+	}
+}

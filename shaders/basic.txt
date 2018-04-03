@@ -1,0 +1,3 @@
+has_vertex_color_attribute:		true
+has_vertex_uv_attribute:		false
+number_of_tex_units:			0

@@ -1,0 +1,6 @@
+{
+	name : DRAW_GAME_GUI,
+	nonSerialized : {
+		draw : { type : "update_function *" }
+	}
+}

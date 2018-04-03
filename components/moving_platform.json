@@ -1,0 +1,7 @@
+{
+	name : MOVING_PLATFORM,
+	serialized : {
+		bl : { type : ivec2 },
+		ur : { type : ivec2 }
+	}
+}

@@ -1,0 +1,6 @@
+[
+	{ "time" : 0.10,		"sprite" : "GirlRunningFiringWand1" },
+	{ "time" : 0.13,		"sprite" : "GirlRunningFiringWand2" },
+	{ "time" : 0.10,		"sprite" : "GirlRunningFiringWand3" },
+	{ "time" : 0.13,		"sprite" : "GirlRunningFiringWand4" },
+]

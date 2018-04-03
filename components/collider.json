@@ -1,0 +1,10 @@
+{
+	name : COLLIDER,
+	nonSerialized : {
+		mask : { type : uint16_t },
+		category : { type : uint16_t },
+		ur : { type : ivec2 },
+		bl : { type : ivec2 },
+		collisions : { type : int16_t, count : 4 }
+	}
+}

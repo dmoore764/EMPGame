@@ -1,0 +1,8 @@
+{
+	name : RIDES_PLATFORMS,
+	
+	nonSerialized : {
+		platformID : { type : int, default: -1 },
+		lastVel : { type : ivec2 }
+	}
+}

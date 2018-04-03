@@ -1,0 +1,6 @@
+{
+	name : DRAW_EDITOR_GUI,
+	nonSerialized : {
+		draw : { type : "update_function *" }
+	}
+}

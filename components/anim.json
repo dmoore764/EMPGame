@@ -1,0 +1,11 @@
+{
+	name : ANIM,
+	serialized : {
+		name :			{ type : "char *" },
+		playing :		{ type : "bool", default : true },
+		loop :			{ type : "bool", default : true },
+		speedFactor :	{ type : "float", default : 1 },
+		frameTime :		{ type : "float", default : 0 },
+		currentFrame :	{ type : "int", default : 0 },
+	}
+}

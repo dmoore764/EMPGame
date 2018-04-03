@@ -1,0 +1,6 @@
+{
+	name : COUNTERS,
+	serialized : {
+		counters : { type: uint32_t, default : 0 }
+	}
+}

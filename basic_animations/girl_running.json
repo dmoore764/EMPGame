@@ -1,0 +1,6 @@
+[
+	{ "time" : 0.10,		"sprite" : "GirlRunning1" },
+	{ "time" : 0.13,		"sprite" : "GirlRunning2" },
+	{ "time" : 0.10,		"sprite" : "GirlRunning3" },
+	{ "time" : 0.13,		"sprite" : "GirlRunning4" },
+]

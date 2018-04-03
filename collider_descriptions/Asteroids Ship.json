@@ -1,0 +1,17 @@
+{
+	"collision mask": [
+			{
+				"type": "poly",
+				"points": [
+							[99,0],
+							[194,127],
+							[2,127]
+						  ]
+			}
+			//{
+			//	"type": "circle",
+			//	"radius": 50,
+			//	"center": [2,128]	
+			//}
+		]
+}

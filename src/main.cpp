@@ -1,0 +1,396 @@
+#include "dan_engine.h"
+
+global_variable application App;
+global_variable renderer Rend;
+
+#include "components.h"
+#include "actions.h"
+
+#define MAP_W 1024
+#define MAP_H 1024
+global_variable uint32_t		TileMap[MAP_W*MAP_H];
+
+struct level_objects
+{
+	char *prefab;
+	ivec2 pos;
+	int objectID;
+};
+
+global_variable level_objects LevelObjects[1000];
+global_variable int NumLevelObjects;
+
+void DeleteLevelObject(int i)
+{
+	assert(i < NumLevelObjects);
+	RemoveObject(LevelObjects[i].objectID);
+	if (i < NumLevelObjects - 1)
+		LevelObjects[i] = LevelObjects[NumLevelObjects-1];
+	NumLevelObjects--;
+}
+
+struct GameCamera
+{
+	glm::ivec2 pos;
+	int width;
+	int height;
+	float aspect; //w/h
+	float rotation; //not used currently
+};
+global_variable GameCamera		Camera;
+
+void SerializeLevel(bool *savedLevel, char *levelName = NULL);
+#include "systems.cpp"
+#include "updates.cpp"
+#include "actions.cpp"
+#include "serialization.h"
+
+#include "dan_engine.cpp"
+
+struct draw_object
+{
+	int depth;
+	int goId;
+	union
+	{
+		struct
+		{
+			cmp_sprite *sprite;
+			cmp_transform *tx;
+		};
+		update_function *draw;
+	};
+};
+
+int main(int arg_count, char **args)
+{
+	srand(time(NULL));
+	ApplicationInit("Game Window", {274, 154}, 4);
+	RendererInit();
+
+	SetupGameInput();
+	SetupGameData();
+	SfxInitialize();
+
+	//InitGame();
+
+	Camera.pos = {4000 << 9, 4000 << 9};
+	Camera.width = (int)App.gameWindowSize.x << 9;
+	Camera.height = (int)App.gameWindowSize.y << 9;
+	Camera.aspect = Camera.width / (float)Camera.height;
+
+	{
+		InitGameFunctions();
+		InitTiles();
+		InitGlobalActions();
+	}
+
+	{
+		int goId = AddObject(OBJ_MODE_SELECTOR);
+		auto meta = GO(metadata);
+		auto update = GO(update);
+		auto editor_draw = GO(draw_editor_gui);
+		meta->cmpInUse = UPDATE | DRAW_EDITOR_GUI;
+		InitObject(goId);
+		update->update = ModeSelector;
+		editor_draw->draw = ModeSelectorEditorDraw;
+	}
+
+	{
+		int goId = AddObject(OBJ_GAME_CAMERA);
+		auto meta = GO(metadata);
+		meta->cmpInUse = UPDATE;
+		auto update = GO(update);
+		InitObject(goId);
+		update->update = CameraUpdate;
+	}
+
+	{
+		int goId = AddObject(OBJ_LEVEL_LOADER);
+		auto meta = GO(metadata);
+		auto update = GO(update);
+		meta->cmpInUse = UPDATE;
+		InitObject(goId);
+		update->update = LevelLoader;
+	}
+
+	{
+		int goId = AddObject(OBJ_LEVEL_SAVER);
+		auto meta = GO(metadata);
+		auto update = GO(update);
+		meta->cmpInUse = UPDATE;
+		InitObject(goId);
+		update->update = LevelSaver;
+	}
+
+	{
+		int goId = AddObject(OBJ_MAGIC_BULLET_TRAIL_DRAWER);
+		auto meta = GO(metadata);
+		auto special_draw = GO(special_draw);
+		meta->cmpInUse = SPECIAL_DRAW;
+		InitObject(goId);
+		special_draw->draw = MagicBulletTrailDrawer;
+		special_draw->depth = 11;
+	}
+
+	{
+		int goId = AddObject(OBJ_BASIC_BULLET_DRAWER);
+		auto meta = GO(metadata);
+		auto special_draw = GO(special_draw);
+		meta->cmpInUse = SPECIAL_DRAW;
+		InitObject(goId);
+		special_draw->draw = BasicBulletUpdateAndDraw;
+		special_draw->depth = 11;
+	}
+
+	{
+		int goId = AddObject(OBJ_TILE_DRAWER);
+		auto meta = GO(metadata);
+		auto special_draw = GO(special_draw);
+		meta->cmpInUse = SPECIAL_DRAW;
+		InitObject(goId);
+		special_draw->draw = TileDrawer;
+		special_draw->depth = 10;
+	}
+
+	/*{
+		int goId = AddObject(OBJ_RAIN_GENERATOR);
+		auto meta = GO(metadata);
+		auto special_draw = GO(special_draw);
+		meta->cmpInUse = SPECIAL_DRAW;
+		special_draw->draw = RainUpdateAndDraw;
+	}*/
+
+	{
+		int goId = AddObject(OBJ_DEBUG_DISPLAY);
+		auto meta = GO(metadata);
+		auto draw = GO(draw_editor_gui);
+		meta->cmpInUse = DRAW_EDITOR_GUI;
+		InitObject(goId);
+		draw->draw = DisplayDebugMessage;
+	}
+
+
+	CreateFrameBuffer("game_buffer", App.gameWindowSize.x * 2, App.gameWindowSize.y * 2, true, true, true);
+
+	GameGuiVP = glm::ortho(0.0f, (float)(Camera.width >> 8), 0.0f, (float)(Camera.height >> 8), 150000.0f, -150000.0f);
+	GetFrameBufferWindowProjection("game_buffer", &GameWindowProj);
+
+
+	bool running = true;
+	float deltaTime = 0.01666f;
+
+	while(true)
+	{
+		GameVP = glm::ortho(-(float)(Camera.width >> 1), (float)(Camera.width >> 1), -(float)(Camera.height >> 1), (float)(Camera.height >> 1) , 150000.0f, -150000.0f);
+
+		if (!ProcessEvents())
+			break;
+
+		App.currentTime++;
+
+		SfxUpdate();
+		UpdateGameSounds(deltaTime);
+
+		Prepare2DRender();
+		
+		glClearColor(0,0,0,1);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		SetFrameBuffer("game_buffer");
+		SetViewFromMatrix(&GameVP);
+		ClearScreen(0.15f, 0.15f,0.15f,1, true);
+
+		//Process game objects
+		{
+			//Process actions first
+			ProcessActions(0.016f);
+
+			//check objects that might be on moveable platforms
+			if (SendingGameUpdateEvents)
+			{
+				for (int i = 0; i < NumGameObjects; i++)
+				{
+					auto meta = &GameComponents.metadata[i];
+					if ((meta->cmpInUse & RIDES_PLATFORMS) && (meta->cmpInUse & TRANSFORM))
+					{
+						bool ridingPlatform = false;
+						auto rider = &GameComponents.rides_platforms[i];
+						auto tx = &GameComponents.transform[i];
+						for (int j = 0; j < NumGameObjects; j++)
+						{
+							auto platformMeta = &GameComponents.metadata[j];
+							if ((platformMeta->cmpInUse & MOVING_PLATFORM) && (platformMeta->cmpInUse & TRANSFORM) && (platformMeta->cmpInUse & PHYSICS))
+							{
+								auto platform = &GameComponents.moving_platform[j];
+								auto platformTx = &GameComponents.transform[j];
+								ivec2 centerFoot = {tx->pos.x, tx->pos.y - 0x200};
+								if (PointInAABB(centerFoot, {platformTx->pos.x + platform->bl.x, 
+											platformTx->pos.y + platform->bl.y}, 
+											{platformTx->pos.x + platform->ur.x, 
+											platformTx->pos.y + platform->ur.y}))
+								{
+									ridingPlatform = true;
+									auto platformPhy = &GameComponents.physics[j];
+									if (rider->platformID == -1)
+									{
+										//store the platform information into the rider
+										auto riderPhy = &GameComponents.physics[i];
+										riderPhy->vel -= platformPhy->vel;
+										rider->platformID = GameComponents.idIndex[j];
+									}
+									tx->pos += platformPhy->vel;
+									rider->lastVel = platformPhy->vel;
+								}
+							}
+						}
+						if (!ridingPlatform && rider->platformID != -1)
+						{
+							//add the velocity to the rider's physics once separated
+							auto riderPhy = &GameComponents.physics[i];
+							riderPhy->vel += rider->lastVel;
+							rider->platformID = -1;
+						}
+					}
+				}
+			}
+
+			//update all transforms
+			for (int i = 0; i < NumGameObjects; i++)
+			{
+				auto meta = &GameComponents.metadata[i];
+
+				if (!(meta->flags & GAME_OBJECT) || (SendingGameUpdateEvents && (meta->flags & GAME_OBJECT)))
+				{
+					if ((meta->cmpInUse & PHYSICS) && (meta->cmpInUse & TRANSFORM))
+					{
+						auto tx = &GameComponents.transform[i];
+						auto phys = &GameComponents.physics[i];
+
+						phys->vel += phys->accel;
+						tx->pos += phys->vel;
+					}
+				}
+			}
+
+			
+			//Check for all collisions
+			for (int i = 0; i < NumGameObjects; i++)
+			{
+				auto meta = &GameComponents.metadata[i];
+				if ((meta->cmpInUse & COLLIDER) && (meta->cmpInUse & TRANSFORM))
+					CollisionUpdate(GameComponents.idIndex[i]);
+			}
+
+
+			draw_object objectsToDraw[10000];
+			int numObjectsToDraw = 0;
+
+			for (int i = 0; i < NumGameObjects; i++)
+			{
+				auto meta = &GameComponents.metadata[i];
+
+				if (!(meta->flags & GAME_OBJECT) || (SendingGameUpdateEvents && (meta->flags & GAME_OBJECT)))
+				{
+					if ((meta->cmpInUse & ANIM) && (meta->cmpInUse & SPRITE))
+						AnimationUpdate(GameComponents.idIndex[i]);
+
+					if (meta->cmpInUse & UPDATE)
+					{
+						auto update = &GameComponents.update[i];
+						update->update(GameComponents.idIndex[i]);
+					}
+				}
+
+				if (meta->cmpInUse & SPECIAL_DRAW)
+				{
+					auto draw = &GameComponents.special_draw[i];
+					draw_object *obj = &objectsToDraw[numObjectsToDraw++];
+					obj->depth = draw->depth;
+					obj->draw = draw->draw;
+					obj->goId = GameComponents.idIndex[i];
+				}
+				else if ((meta->cmpInUse & TRANSFORM) && (meta->cmpInUse & SPRITE))
+				{
+					auto sprite = &GameComponents.sprite[i];
+					auto tx = &GameComponents.transform[i];
+
+					draw_object *obj = &objectsToDraw[numObjectsToDraw++];
+					obj->depth = sprite->depth;
+					obj->sprite = sprite;
+					obj->tx = tx;
+					obj->goId = -1;
+				}
+			}
+
+			for (int i = 0; i < numObjectsToDraw-1; i++)
+			{
+				for (int j = 0; j < numObjectsToDraw-i-1; j++)
+				{
+					if (objectsToDraw[j].depth > objectsToDraw[j+1].depth)
+					{
+						draw_object tmp = objectsToDraw[j];
+						objectsToDraw[j] = objectsToDraw[j+1];
+						objectsToDraw[j+1] = tmp;
+					}
+				}
+			}
+
+			for (int i = 0; i < numObjectsToDraw; i++)
+			{
+				draw_object *obj = &objectsToDraw[i];
+				if (obj->goId >= 0)
+				{
+					obj->draw(obj->goId);
+				}
+				else
+				{
+					SetShader("basic_tex_color");
+                    DrawSprite(obj->sprite->name, obj->sprite->color, ToScreen(obj->tx->pos.x, obj->tx->pos.y), obj->tx->rot, {obj->tx->scale.x * 0x200, obj->tx->scale.y * 0x200});
+				}
+			}
+
+
+			SetViewFromMatrix(&GameGuiVP);
+
+			for (int i = 0; i < NumGameObjects; i++)
+			{
+				auto meta = &GameComponents.metadata[i];
+				if (meta->cmpInUse & DRAW_GAME_GUI)
+				{
+					auto draw = &GameComponents.draw_game_gui[i];
+					draw->draw(GameComponents.idIndex[i]);
+				}
+			}
+
+			ResetFrameBuffer();
+			SetView(0, 0, 1);
+			SetShader("basic_tex_color");
+			SetTextureFromFrameBuffer("game_buffer");
+			DrawTexture(COL_WHITE, 0, 0, 4, 4);
+
+			SetViewFromMatrix(&GuiVP);
+
+			for (int i = 0; i < NumGameObjects; i++)
+			{
+				auto meta = &GameComponents.metadata[i];
+				if (meta->cmpInUse & DRAW_EDITOR_GUI)
+				{
+					auto draw = &GameComponents.draw_editor_gui[i];
+					draw->draw(GameComponents.idIndex[i]);
+				}
+			}
+
+
+		}
+		ProcessObjectRemovals();
+
+		Process2DRenderList();
+
+		ShowFrame();
+		ReloadDynamicData();
+	}
+
+	ApplicationShutdown();
+	return 0;
+}

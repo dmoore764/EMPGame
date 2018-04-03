@@ -1,0 +1,6 @@
+[
+	{ "time" : 0.15,		"sprite" : "GirlJumping1" },
+	{ "time" : 0.15,		"sprite" : "GirlJumping2" },
+	{ "time" : 0.15,		"sprite" : "GirlJumping3" },
+	{ "time" : 0.15,		"sprite" : "GirlJumping4" },
+]

@@ -1,0 +1,17 @@
+[
+	{ "time" : 0.40,		"sprite" : "EjectingCrystal1" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal2" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal3" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal4" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal5" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal6" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal7" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal8" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal9" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal10" },
+	{ "time" : 0.20,		"sprite" : "EjectingCrystal11" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal12" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal13" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal14" },
+	{ "time" : 0.05,		"sprite" : "EjectingCrystal15" },
+]

@@ -1,0 +1,20 @@
+{
+	type : OBJ_PLAYER,
+	components : [ UPDATE, CUSTOM_FLAGS, PHYSICS, TRANSFORM, ANIM, SPRITE, SPECIAL_DRAW, RIDES_PLATFORMS, COLLIDER ],
+	data : {
+		update : {
+			update : "PlayerUpdate"
+		},
+		special_draw : {
+			depth : 5,
+			draw : "PlayerDraw"
+		},
+		anim : {
+			name : "girl_falling",
+		},
+		collider : {
+			ur : [3072, 7680],
+			bl : [-3072, 0],
+		},
+	}
+}
