@@ -1,7 +1,10 @@
 {
 	type : OBJ_PLATFORM,
-	components : [ MOVING_PLATFORM, TRANSFORM, PHYSICS, SPRITE ], 
+	components : [ UPDATE, MOVING_PLATFORM, TRANSFORM, PHYSICS, SPRITE ], 
 	data : {
+		update : {
+			update : "PlatformUpdate"
+		},
 		moving_platform : {
 			bl : [-5120, 0],
 			ur : [5120,5120],

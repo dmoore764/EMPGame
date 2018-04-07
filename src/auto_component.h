@@ -93,6 +93,9 @@ struct cmp_rides_platforms
     //nonSerialized members
     int platformID;
     ivec2 lastVel;
+    ivec2 size;
+    int16_t pushedH;
+    int16_t pushedV;
 };
 
 
@@ -587,6 +590,16 @@ int DeserializeObject(json_value *val)
 				else if (strcmp(member->key, "lastVel") == 0)
                 {
                     DeserializeIvec2(member->value, &c->lastVel);
+                }
+				else if (strcmp(member->key, "size") == 0)
+                {
+                    DeserializeIvec2(member->value, &c->size);
+                }
+				else if (strcmp(member->key, "pushedH") == 0)
+                {
+                }
+				else if (strcmp(member->key, "pushedV") == 0)
+                {
                 }
 				member = member->next;
 			}

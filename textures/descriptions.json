@@ -345,6 +345,22 @@
 		}
 	},
 	{
+		sprite : "GirlClimbingLadder1",
+		origin : [8,19],
+	},
+	{
+		sprite : "GirlClimbingLadder2",
+		origin : [8,19],
+	},
+	{
+		sprite : "GirlClimbingLadder3",
+		origin : [8,19],
+	},
+	{
+		sprite : "GirlClimbingLadder4",
+		origin : [8,19],
+	},
+	{
 		sprite : "GirlRunning1",
 		origin : [8,19],
 		POIs : {

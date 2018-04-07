@@ -3,6 +3,9 @@
 	
 	nonSerialized : {
 		platformID : { type : int, default: -1 },
-		lastVel : { type : ivec2 }
+		lastVel : { type : ivec2 },
+		size : { type : ivec2 },
+		pushedH : { type : int16_t },
+		pushedV : { type : int16_t },
 	}
 }

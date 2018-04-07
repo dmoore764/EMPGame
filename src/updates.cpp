@@ -219,8 +219,8 @@ enum player_flags
 
 enum player_counters
 {
-	PLYR_NEXT_SHOT				= 0,
-	PLYR_TIME_SINCE_FIRED		= 1,
+	PLYR_SINCE_LEFT_GROUND		= 0,
+	//PLYR_JUMP_HEIGHT			= 1,
 	PLYR_ITEM_CARRIED			= 2,
 	PLYR_TIME_SINCE_JUMP		= 3,
 };
@@ -324,6 +324,7 @@ struct tile_brush_part
 	int xOffset;
 	int yOffset;
 	uint8_t tileNum;
+	bool front;
 };
 
 struct tile_brush
@@ -360,15 +361,15 @@ void InitTiles()
 
 	Brushes[TS_DIRT][0] = {
 		{
-			{ 0,  1,  0 },
-			{ 0,  0,  8 },
+			{ 0,  1,  0, true },
+			{ 0,  0,  8, true },
 		},
 		2
 	};
 	Brushes[TS_DIRT][1] = {
 		{
-			{ 0,  1,  1 },
-			{ 0,  0,  9 },
+			{ 0,  1,  1, true },
+			{ 0,  0,  9, true },
 		},
 		2
 	};
@@ -379,8 +380,8 @@ void InitTiles()
 
 	Brushes[TS_DIRT][2] = {
 		{
-			{ 0,  1,  2 },
-			{ 0,  0,  10},
+			{ 0,  1,  2, true },
+			{ 0,  0,  10, true },
 		},
 		2
 	};
@@ -391,8 +392,8 @@ void InitTiles()
 
 	Brushes[TS_DIRT][3] = {
 		{
-			{ 0,  1,  3 },
-			{ 0,  0,  11},
+			{ 0,  1,  3, true },
+			{ 0,  0,  11, true },
 		},
 		2
 	};
@@ -403,8 +404,8 @@ void InitTiles()
 
 	Brushes[TS_DIRT][4] = {
 		{
-			{ 0,  1,  4 },
-			{ 0,  0,  12},
+			{ 0,  1,  4, true },
+			{ 0,  0,  12, true },
 		},
 		2
 	};
@@ -415,9 +416,9 @@ void InitTiles()
 
 	Brushes[TS_DIRT][5] = {
 		{
-			{ 0,  2,  5 },
-			{ 0,  1,  13},
-			{ 0,  0,  21},
+			{ 0,  2,  5, true },
+			{ 0,  1,  13, true },
+			{ 0,  0,  21, true },
 		},
 		3
 	};
@@ -428,9 +429,9 @@ void InitTiles()
 
 	Brushes[TS_DIRT][6] = {
 		{
-			{ 0,  2,  6 },
-			{ 0,  1,  14},
-			{ 0,  0,  22},
+			{ 0,  2,  6, true },
+			{ 0,  1,  14, true },
+			{ 0,  0,  22, true },
 		},
 		3
 	};
@@ -439,30 +440,30 @@ void InitTiles()
 		1
 	};
 
-	Brushes[TS_DIRT][7] = { {{ 0,  0,  17 }}, 1 };
-	Brushes[TS_DIRT][8] = { {{ 0,  0,  18 }}, 1 };
-	Brushes[TS_DIRT][9] = { {{ 0,  0,  19 }}, 1 };
-	Brushes[TS_DIRT][10] = { {{ 0,  0,  20 }}, 1 };
-	Brushes[TS_DIRT][11] = { {{ 0,  0,  21 }}, 1 };
-	Brushes[TS_DIRT][12] = { {{ 0,  0,  22 }}, 1 };
+	Brushes[TS_DIRT][7] = { {{ 0,  0,  17, true }}, 1 };
+	Brushes[TS_DIRT][8] = { {{ 0,  0,  18, true }}, 1 };
+	Brushes[TS_DIRT][9] = { {{ 0,  0,  19, true }}, 1 };
+	Brushes[TS_DIRT][10] = { {{ 0,  0,  20, true }}, 1 };
+	Brushes[TS_DIRT][11] = { {{ 0,  0,  21, true }}, 1 };
+	Brushes[TS_DIRT][12] = { {{ 0,  0,  22, true }}, 1 };
 	TilePaintBrush[TS_DIRT][6] = {
 		{ 7, 8, 9, 10, 11, 12 },
 		6
 	};
 
-	Brushes[TS_DIRT][13] = { {{ 0,  0,  16 }}, 1 };
+	Brushes[TS_DIRT][13] = { {{ 0,  0,  16, true }}, 1 };
 	TilePaintBrush[TS_DIRT][7] = {
 		{ 13 },
 		1
 	};
 
-	Brushes[TS_DIRT][14] = { {{ 0,  0,  63 }}, 1 };
+	Brushes[TS_DIRT][14] = { {{ 0,  0,  63, true }}, 1 };
 	TilePaintBrush[TS_DIRT][8] = {
 		{ 14 },
 		1
 	};
 
-	Brushes[TS_DIRT][15] = { {{ 0,  0,  24 }}, 1 };
+	Brushes[TS_DIRT][15] = { {{ 0,  0,  24, false }}, 1 };
 	TilePaintBrush[TS_DIRT][9] = {
 		{ 15 },
 		1
@@ -476,13 +477,15 @@ enum tile_flags
 {
 	TILE_IN_USE			= 0x1,
 	MODIFIED_TILE_TYPE	= 0x2,
+	HAS_FRONT			= 0x4,
+	HAS_BACK			= 0x8,
 };
 
 //tileSet and tileNum both are needed to specify the graphic
 
-uint32_t NewTile(uint8_t tileNum, uint8_t tileType, uint8_t tileSet, uint8_t tileFlags)
+uint32_t NewTile(uint8_t tileNumF, uint8_t tileNumB, uint8_t tileSet, uint8_t tileFlags)
 {
-	return MAKE_COLOR(tileType,tileNum,tileSet,tileFlags);
+	return MAKE_COLOR(tileNumB,tileNumF,tileSet,tileFlags);
 }
 
 inline uint8_t TileFlags(uint32_t tile)
@@ -495,31 +498,31 @@ inline uint8_t TileSet(uint32_t tile)
 	return ((tile & 0xff0000) >> 16);
 }
 
-inline uint8_t TileNum(uint32_t tile)
+inline uint8_t TileNumF(uint32_t tile)
 {
 	return ((tile & 0xff00) >> 8);
 }
 
-inline uint8_t TileType(uint32_t tile)
+inline uint8_t TileNumB(uint32_t tile)
 {
 	return (tile & 0xff);
 }
 
-inline uint32_t TileAtPoint(ivec2 p, int y)
+inline uint8_t TileAtPoint(ivec2 p, int y)
 {
 	p.x >>= 12;
 	p.y >>= 12;
 	if (p.x >= 0 && p.y >= 0 && p.x < MAP_W && p.y < MAP_H)
 	{
-		uint32_t t = TileMap[p.y*MAP_W + p.x];
-		if (TileType(t) == ONE_WAY)
+		uint8_t t = TileMapI[p.y*MAP_W + p.x];
+		if (t == ONE_WAY)
 		{
 			int py = (p.y + 1) << 12;
 			t &= ~0xff;
 			if (y >= py)
 				t |= SQUARE;
 		}
-		else if (TileType(t) == LADDER_TOP)
+		else if (t == LADDER_TOP)
 		{
 			int py = (p.y + 1) << 12;
 			t &= ~0xff;
@@ -534,13 +537,13 @@ inline uint32_t TileAtPoint(ivec2 p, int y)
 	return 0;
 }
 
-inline uint32_t TileAtPoint(ivec2 p)
+inline uint8_t TileAtPoint(ivec2 p)
 {
 	p.x >>= 12;
 	p.y >>= 12;
 	if (p.x >= 0 && p.y >= 0 && p.x < MAP_W && p.y < MAP_H)
 	{
-		uint32_t t = TileMap[p.y*MAP_W + p.x];
+		uint8_t t = TileMapI[p.y*MAP_W + p.x];
 		return t;
 	}
 	return 0;
@@ -610,7 +613,7 @@ int GetGroundYForTileAndPos(uint32_t tileX, uint32_t tileY, uint8_t tile, int po
 bool CollidingWithTileAtPoint(uint32_t x, uint32_t y, uint32_t *newY)
 {
 	bool result = false;
-	uint8_t t = TileType(TileAtPoint({x, y}));
+	uint8_t t = TileAtPoint({x, y});
 	switch (t)
 	{
 		case EMPTY: {} break;
@@ -1423,7 +1426,7 @@ void TileTest(test_point *points, int numPoints)
 		int32_t tileX = (p->p.x >> 12) << 12;
 		int32_t tileY = (p->p.y >> 12) << 12;
 
-		uint8_t t = TileType(TileAtPoint({tileX, tileY}));
+		uint8_t t = TileAtPoint({tileX, tileY});
 		switch (p->type)
 		{
 			case POINT_BOTTOM:
@@ -2328,6 +2331,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 	auto anim = GO(anim);
 	auto counters = GO(counters);
 	auto collider = GO(collider);
+	auto rider = GO(rides_platforms);
 
 	bool hasControl = !(flag->bits & CONTROL_LOCKED);
 
@@ -2502,10 +2506,24 @@ UPDATE_FUNCTION(PlayerUpdate)
 	DecrementCounter(&counters->counters, PLYR_NEXT_SHOT);
 	*/
 
+	//check for crush condition
+	bool crushed = false;
+	if (rider->pushedV)
+	{
+		if (rider->pushedV < 0 && ((flag->bits & ON_GROUND) || (flag->bits & ON_SLOPE)))
+			crushed = true;
+		rider->pushedV = 0;
+	}
+	if (rider->pushedH)
+	{
+		rider->pushedH = 0;
+	}
+
 	phys->vel.y = Max(-0x400, phys->vel.y);
 
 	bool wasOnGround = flag->bits & ON_GROUND;
 	flag->bits &= ~ON_GROUND;
+	IncrementCounterNoLoop(&counters->counters, PLYR_SINCE_LEFT_GROUND);
 
 	test_point TestPoints[11] = {};
 	TestPoints[0].p = {tx->pos.x, tx->pos.y - (1 << 9)};
@@ -2517,9 +2535,9 @@ UPDATE_FUNCTION(PlayerUpdate)
 
 	PlatformTest(TestPoints + 0, 3);
 
-	uint8_t centerFootT = TileType(TileAtPoint(TestPoints[0].p, tx->oldY));
-	uint8_t leftFootT = TileType(TileAtPoint(TestPoints[1].p, tx->oldY));
-	uint8_t rightFootT = TileType(TileAtPoint(TestPoints[2].p, tx->oldY));
+	uint8_t centerFootT = TileAtPoint(TestPoints[0].p, tx->oldY);
+	uint8_t leftFootT = TileAtPoint(TestPoints[1].p, tx->oldY);
+	uint8_t rightFootT = TileAtPoint(TestPoints[2].p, tx->oldY);
 
 	tx->oldY = tx->pos.y;
 
@@ -2567,6 +2585,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 	{
 		phys->vel.y = 0;
 		tx->pos.y = platformH;
+		SetCounter(&counters->counters, PLYR_SINCE_LEFT_GROUND, 0);
 		flag->bits |= ON_GROUND;
 		flag->bits &= ~ON_LADDER;
 	}
@@ -2583,6 +2602,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 				flag->bits &= ~LEFT_SLOPE;
 			phys->vel.y = 0;
 			tx->pos.y = tileH;
+			SetCounter(&counters->counters, PLYR_SINCE_LEFT_GROUND, 0);
 			flag->bits |= ON_GROUND;
 			flag->bits &= ~ON_LADDER;
 		}
@@ -2591,13 +2611,14 @@ UPDATE_FUNCTION(PlayerUpdate)
 	{
 		phys->vel.y = 0;
 		tx->pos.y = tileH;
+		SetCounter(&counters->counters, PLYR_SINCE_LEFT_GROUND, 0);
 		flag->bits |= ON_GROUND;
 		flag->bits &= ~ON_LADDER;
 	}
 
 
 
-	uint8_t centerFootUpperT = TileType(TileAtPoint({tx->pos.x, tx->pos.y + (9 << 9)}, tx->oldY));
+	uint8_t centerFootUpperT = TileAtPoint({tx->pos.x, tx->pos.y + (9 << 9)}, tx->oldY);
 
 	if (!(flag->bits & ON_LADDER) && centerFootUpperT == LADDER && keyUpDown && GetCounter(counters->counters, PLYR_TIME_SINCE_JUMP) > 15)
 	{
@@ -2605,19 +2626,28 @@ UPDATE_FUNCTION(PlayerUpdate)
 			tx->pos.y += (1<<9); //get off the ground, otherwise character gets stuck
 		flag->bits |= ON_LADDER;
 		flag->bits &= ~ON_GROUND;
+		anim->name = "girl_climbing_ladder";
+		anim->loop = true;
+		anim->playing = false;
+		anim->frameTime = 0;
 	}
 
-	uint8_t centerFootBelowT = TileType(TileAtPoint({tx->pos.x, tx->pos.y - (1 << 9)}));
+	uint8_t centerFootBelowT = TileAtPoint({tx->pos.x, tx->pos.y - (1 << 9)});
 
 	if (centerFootBelowT == LADDER_TOP && keyDownDown)
 	{
 		tx->pos.y -= (1<<9);
 		flag->bits |= ON_LADDER;
 		flag->bits &= ~ON_GROUND;
+		anim->name = "girl_climbing_ladder";
+		anim->loop = true;
+		anim->playing = false;
+		anim->frameTime = 0;
 	}
 
 	if (flag->bits & ON_LADDER)
 	{
+		flag->bits &= ~HOLDING_JUMP;
 		phys->vel.y = 0;
 		phys->vel.x = 0;
 		phys->accel.x = 0;
@@ -2631,7 +2661,9 @@ UPDATE_FUNCTION(PlayerUpdate)
 		else if (keyDownDown)
 			phys->vel.y = -0x100;
 
-		uint8_t centerFootLowerT = TileType(TileAtPoint({tx->pos.x, tx->pos.y}, tx->oldY));
+		anim->playing = (phys->vel.y != 0);
+
+		uint8_t centerFootLowerT = TileAtPoint({tx->pos.x, tx->pos.y}, tx->oldY);
 		if (centerFootUpperT != LADDER && centerFootLowerT != LADDER)
 			flag->bits &= ~ON_LADDER;
 
@@ -2644,6 +2676,10 @@ UPDATE_FUNCTION(PlayerUpdate)
 
 			phys->vel.y = 0x310;
 			flag->bits &= ~ON_LADDER;
+			anim->name = "girl_jumping";
+			anim->frameTime = 0;
+			anim->loop = false;
+			anim->playing = true;
 			
 			SetCounter(&counters->counters, PLYR_TIME_SINCE_JUMP, 0);
 		}
@@ -2666,7 +2702,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 	bool colHead = false;
 	int colPointHead = INT_MAX;
 
-	if (TileType(TileAtPoint(TestPoints[9].p)) == SQUARE || TileType(TileAtPoint(TestPoints[10].p)) == SQUARE)
+	if (TileAtPoint(TestPoints[9].p) == SQUARE || TileAtPoint(TestPoints[10].p) == SQUARE)
 	{
 		colHead = true;
 		int tileYatHead = (((tx->pos.y + (15 << 9)) >> 12) << 12);
@@ -2700,7 +2736,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 
 	if ((flag->bits & SLIDING) || (flag->bits & SKIDDING))
 	{
-		foot2 = foot3 = 9;
+		foot2 = foot3 = 8;
 	}
 
 	TestPoints[3].p = {tx->pos.x - (6 << 9), tx->pos.y + (foot1 << 9)};
@@ -2726,13 +2762,13 @@ UPDATE_FUNCTION(PlayerUpdate)
 
 	if (!(flag->bits & ON_LADDER))
 	{
-		if ((!continuousSlope && TileType(TileAtPoint(TestPoints[3].p)) == SQUARE) || (TileType(TileAtPoint(TestPoints[4].p)) == SQUARE) || (TileType(TileAtPoint(TestPoints[5].p)) == SQUARE))
+		if ((!continuousSlope && TileAtPoint(TestPoints[3].p) == SQUARE) || (TileAtPoint(TestPoints[4].p) == SQUARE) || (TileAtPoint(TestPoints[5].p) == SQUARE))
 		{
 			int tileX = (tx->pos.x - (6 << 9)) >> 12;
 			colPointL = ((tileX + 1) << 12) + (6 << 9);
 			colLeft = true;
 		}
-		if ((!continuousSlope && TileType(TileAtPoint(TestPoints[6].p)) == SQUARE) || (TileType(TileAtPoint(TestPoints[7].p)) == SQUARE) || (TileType(TileAtPoint(TestPoints[8].p)) == SQUARE))
+		if ((!continuousSlope && TileAtPoint(TestPoints[6].p) == SQUARE) || (TileAtPoint(TestPoints[7].p) == SQUARE) || (TileAtPoint(TestPoints[8].p) == SQUARE))
 		{
 			int tileX = (tx->pos.x + (6 << 9)) >> 12;
 			colPointR = ((tileX) << 12) - (6 << 9);
@@ -2789,10 +2825,12 @@ UPDATE_FUNCTION(PlayerUpdate)
 	}
 
 	if (flag->bits & ON_LADDER)
+	{
 		return;
+	}
 
 	//Check if standing on slope
-	uint8_t footT = TileType(TileAtPoint({tx->pos.x, tx->pos.y}));
+	uint8_t footT = TileAtPoint({tx->pos.x, tx->pos.y});
 	if (footT >= SMALL_SLOPE_LEFT1 && footT <= LARGE_SLOPE_RIGHT)
 	{
 		int32_t tileX = (tx->pos.x >> 12) << 12;
@@ -2807,15 +2845,14 @@ UPDATE_FUNCTION(PlayerUpdate)
 				flag->bits &= ~LEFT_SLOPE;
 			phys->vel.y = 0;
 			tx->pos.y = groundY;
+			SetCounter(&counters->counters, PLYR_SINCE_LEFT_GROUND, 0);
 			flag->bits |= ON_GROUND;
 		}
 	}
 
-
-
-	if (flag->bits & ON_GROUND)
+	//allow a small window to jump after walking off ledge (to make it less frustrating when trying to make a long jump)
+	if (GetCounter(counters->counters, PLYR_SINCE_LEFT_GROUND) < 5 && phys->vel.y <= 0 && keyAction1Pressed)
 	{
-		phys->accel.y = 0;
 		if (keyAction1Pressed)
 		{
 			phys->vel.y = 0x380;
@@ -2826,6 +2863,10 @@ UPDATE_FUNCTION(PlayerUpdate)
 			flag->bits &= ~ON_GROUND;
 			flag->bits |= HOLDING_JUMP;
 		}
+	}
+	else if (flag->bits & ON_GROUND)
+	{
+		phys->accel.y = 0;
 	}
 	else
 	{
@@ -3052,6 +3093,43 @@ UPDATE_FUNCTION(PlayerUpdate)
 				anim->name = "girl_falling";
 		}
 	}
+
+	rider->size.y = (foot3 << 9);
+}
+
+
+UPDATE_FUNCTION(PlatformUpdate)
+{
+	auto tx = GO(transform);
+	auto phys = GO(physics);
+	auto counters = GO(counters);
+
+	uint8_t mode = GetCounter(counters->counters, 0);
+
+	switch (mode)
+	{
+		case 0:
+		{
+			phys->vel.x = 0x80;
+			uint8_t time = IncrementCounter(&counters->counters, 1);
+			if (time > 100)
+			{
+				ClearCounter(&counters->counters, 1);
+				SetCounter(&counters->counters, 0, 1);
+			}
+		} break;
+
+		case 1:
+		{
+			phys->vel.x = -0x80;
+			uint8_t time = IncrementCounter(&counters->counters, 1);
+			if (time > 100)
+			{
+				ClearCounter(&counters->counters, 1);
+				SetCounter(&counters->counters, 0, 0);
+			}
+		} break;
+	}
 }
 
 
@@ -3198,9 +3276,15 @@ UPDATE_FUNCTION(DisplayDebugMessage)
 	}
 }
 
+enum tile_drawer_flags
+{
+	TILE_DRAWER_DRAW_FRONT  = 0x1,
+	TILE_DRAWER_DRAW_BACK	= 0x2,
+};
 
 UPDATE_FUNCTION(TileDrawer)
 {
+	auto flag = GO(custom_flags);
 	//Draw tiles
 	{
 		//get corners of view
@@ -3220,12 +3304,14 @@ UPDATE_FUNCTION(TileDrawer)
 		game_tile_sprites *s;
 		sprite_atlas *atlas;
 		float u0, v0, u1, v1;
+		bool frontDrawer = flag->bits & TILE_DRAWER_DRAW_FRONT;
+		bool backDrawer = flag->bits & TILE_DRAWER_DRAW_BACK;
 
 		for (int y = tileStartY; y < tileEndY; y++)
 		{
 			for (int x = tileStartX; x < tileEndX; x++)
 			{
-				uint32_t t = TileMap[y*MAP_W + x];
+				uint32_t t = TileMapV[y*MAP_W + x];
 				uint8_t flags = TileFlags(t);
 				if (!(flags & TILE_IN_USE))
 					continue;
@@ -3241,8 +3327,16 @@ UPDATE_FUNCTION(TileDrawer)
 					SetTexture(atlas->tex);
 				}
 
-				game_tile *tile = &s->tiles[TileNum(t)];
-				DrawTile(x, y, tile->u0, tile->u1, tile->v0, tile->v1, Camera.pos);
+				if ((flags & HAS_FRONT) && frontDrawer)
+				{
+					game_tile *tile = &s->tiles[TileNumF(t)];
+					DrawTile(x, y, tile->u0, tile->u1, tile->v0, tile->v1, Camera.pos);
+				}
+				if ((flags & HAS_BACK) && backDrawer)
+				{
+					game_tile *tile = &s->tiles[TileNumB(t)];
+					DrawTile(x, y, tile->u0, tile->u1, tile->v0, tile->v1, Camera.pos);
+				}
 			}
 		}
 	}
@@ -3316,6 +3410,7 @@ void ExitEditorMode()
 
 global_variable bool LevelLoaderInitialized;
 global_variable int OnLevel = 0;
+global_variable int LoadedLevel = 0;
 
 UPDATE_FUNCTION(LevelSelect)
 {
@@ -3384,7 +3479,10 @@ UPDATE_FUNCTION(LevelLoader)
 					NumLevelObjects = 0;
 					for (int x = 0; x < MAP_W; x++)
 						for (int y = 0; y < MAP_H; y++)
-							TileMap[y*MAP_W + x] = 0;
+						{
+							TileMapV[y*MAP_W + x] = 0;
+							TileMapI[y*MAP_W + x] = 0;
+						}
 					NumCameraRestraintAreas = 0;
 
 					ReadInJsonDataFromDirectory(&LevelFolder, &Levels);
@@ -3440,7 +3538,10 @@ UPDATE_FUNCTION(LevelLoader)
 					int counter = 0;
 					while (item)
 					{
-						TileMap[y*MAP_W + x] = GetJSONValAsUint32(item);
+						TileMapV[y*MAP_W + x] = GetJSONValAsUint32(item);
+						item = item->next;
+						assert(item); //we will guarantee the interactive val is stashed too
+						TileMapI[y*MAP_W + x] = (uint8_t)GetJSONValAsUint32(item);
 						x++;
 						if (++counter == pitch)
 						{
@@ -3452,6 +3553,7 @@ UPDATE_FUNCTION(LevelLoader)
 					}
 				}
 				LevelLoaderInitialized = true;
+				LoadedLevel = curLevel;
 				break;
 			}
 			curLevel++;
@@ -3772,21 +3874,18 @@ UPDATE_FUNCTION(TilePlacerUpdate)
 
 		if (KeyboardDown[KB_O])
 		{
-			TileMap[tileY*MAP_W + tileX] &= ~0xff;
-			TileMap[tileY*MAP_W + tileX] |= ONE_WAY;
-			TileMap[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
+			TileMapI[tileY*MAP_W + tileX] = ONE_WAY;
+			TileMapV[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
 		}
 		else if (KeyboardDown[KB_T])
 		{
-			TileMap[tileY*MAP_W + tileX] &= ~0xff;
-			TileMap[tileY*MAP_W + tileX] |= LADDER_TOP;
-			TileMap[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
+			TileMapI[tileY*MAP_W + tileX] = LADDER_TOP;
+			TileMapV[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
 		}
 		else if (KeyboardDown[KB_E])
 		{
-			TileMap[tileY*MAP_W + tileX] &= ~0xff;
-			TileMap[tileY*MAP_W + tileX] |= EMPTY;
-			TileMap[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
+			TileMapI[tileY*MAP_W + tileX] = EMPTY;
+			TileMapV[tileY*MAP_W + tileX] |= ((int)MODIFIED_TILE_TYPE << 24);
 		}
 		else
 		{
@@ -3799,7 +3898,19 @@ UPDATE_FUNCTION(TilePlacerUpdate)
 
 				if (partX >= 0 && partY >= 0 && partX < MAP_W && partY < MAP_H)
 				{
-					TileMap[partY*MAP_W + partX] = NewTile(brush->parts[i].tileNum, TileSetTypes[UsingTileSet].types[brush->parts[i].tileNum], UsingTileSet, TILE_IN_USE);
+					uint8_t tileNumF = 0, tileNumB = 0;
+					if (brush->parts[i].front)
+						tileNumF = brush->parts[i].tileNum;
+					else
+						tileNumB = brush->parts[i].tileNum;
+					uint8_t tileSetType = TileSetTypes[UsingTileSet].types[brush->parts[i].tileNum];
+					TileMapI[partY*MAP_W + partX] = tileSetType;
+					uint8_t tileFlags = TILE_IN_USE;
+					if (brush->parts[i].front)
+						tileFlags |= HAS_FRONT;
+					else
+						tileFlags |= HAS_BACK;
+					TileMapV[partY*MAP_W + partX] = NewTile(tileNumF, tileNumB, UsingTileSet, tileFlags);
 				}
 			}
 		}
@@ -4336,7 +4447,7 @@ UPDATE_FUNCTION(PrefabMover)
 	gamePosInPixels.x >>= 9;
 	gamePosInPixels.y >>= 9;
 
-	bool reseting = KeyboardPresses[KB_R];
+	bool reseting = KeyboardPresses[KB_R] && !ShiftHeld;
 
 	for (int i = 0; i < NumLevelObjects; i++)
 	{
@@ -4344,8 +4455,8 @@ UPDATE_FUNCTION(PrefabMover)
 
 		if (reseting)
 		{
-			auto tx = OTH(obj->objectID, transform);
-			tx->pos = obj->pos;
+			LevelLoaderInitialized = false;
+			OnLevel = LoadedLevel;
 		}
 
 		//Draw the mover control
@@ -4540,4 +4651,5 @@ void InitGameFunctions()
 {
 	ADD_GAME_FUNCTION(PlayerDraw);
 	ADD_GAME_FUNCTION(PlayerUpdate);
+	ADD_GAME_FUNCTION(PlatformUpdate);
 }

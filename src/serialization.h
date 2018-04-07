@@ -54,7 +54,7 @@ void SerializeLevel(bool *savedLevel, char *levelName)
 	{
 		for (int y = 0; y < MAP_H; y++)
 		{
-			if (TileMap[y*MAP_W + x])
+			if (TileMapV[y*MAP_W + x])
 			{
 				if (x < startX)
 					startX = x;
@@ -103,7 +103,8 @@ void SerializeLevel(bool *savedLevel, char *levelName)
 		{
 			for (int x = startX; x < endX; x++)
 			{
-				fprintf(file, "0x%x,", TileMap[y*MAP_W + x]);
+				fprintf(file, "0x%x,", TileMapV[y*MAP_W + x]);
+				fprintf(file, "%d,", TileMapI[y*MAP_W + x]);
 			}
 			fprintf(file, "\n        ");
 		}

@@ -8,7 +8,8 @@ global_variable renderer Rend;
 
 #define MAP_W 1024
 #define MAP_H 1024
-global_variable uint32_t		TileMap[MAP_W*MAP_H];
+global_variable uint8_t			TileMapI[MAP_W*MAP_H]; //interactive
+global_variable uint32_t		TileMapV[MAP_W*MAP_H]; //visual
 
 struct level_objects
 {
@@ -146,11 +147,25 @@ int main(int arg_count, char **args)
 	{
 		int goId = AddObject(OBJ_TILE_DRAWER);
 		auto meta = GO(metadata);
+		auto flag = GO(custom_flags);
 		auto special_draw = GO(special_draw);
-		meta->cmpInUse = SPECIAL_DRAW;
+		meta->cmpInUse = SPECIAL_DRAW | CUSTOM_FLAGS;
 		InitObject(goId);
 		special_draw->draw = TileDrawer;
 		special_draw->depth = 10;
+		flag->bits = TILE_DRAWER_DRAW_FRONT;
+	}
+
+	{
+		int goId = AddObject(OBJ_TILE_DRAWER);
+		auto meta = GO(metadata);
+		auto flag = GO(custom_flags);
+		auto special_draw = GO(special_draw);
+		meta->cmpInUse = SPECIAL_DRAW | CUSTOM_FLAGS;
+		InitObject(goId);
+		special_draw->draw = TileDrawer;
+		special_draw->depth = 4;
+		flag->bits = TILE_DRAWER_DRAW_BACK;
 	}
 
 	/*{
@@ -206,7 +221,7 @@ int main(int arg_count, char **args)
 			//Process actions first
 			ProcessActions(0.016f);
 
-			//check objects that might be on moveable platforms
+			//check objects that might be on moveable platforms, or pushed by a platform
 			if (SendingGameUpdateEvents)
 			{
 				for (int i = 0; i < NumGameObjects; i++)
@@ -224,23 +239,94 @@ int main(int arg_count, char **args)
 							{
 								auto platform = &GameComponents.moving_platform[j];
 								auto platformTx = &GameComponents.transform[j];
+								auto platformPhys = &GameComponents.physics[j];
+
+								int plT = platformTx->pos.y + platform->ur.y + platformPhys->vel.y;
+								int plB = platformTx->pos.y + platform->bl.y + platformPhys->vel.y;
+								int plL = platformTx->pos.x + platform->bl.x + platformPhys->vel.x;
+								int plR = platformTx->pos.x + platform->ur.x + platformPhys->vel.x;
+								int riderT = tx->pos.y + rider->size.y;
+								int riderB = tx->pos.y - 0x200;
+								int riderL = tx->pos.x - (rider->size.x >> 1);
+								int riderR = tx->pos.x + (rider->size.x >> 1);
+
+								if (riderT > plB && riderB < plT && riderL < plR && riderR > plL)
+								{
+									ridingPlatform = true;
+									if (rider->platformID == -1)
+									{
+										//store the platform information into the rider
+										auto riderPhy = &GameComponents.physics[i];
+										riderPhy->vel -= platformPhys->vel;
+										rider->platformID = GameComponents.idIndex[j];
+									}
+									tx->pos += platformPhys->vel;
+									if (platformPhys->vel.y > 0)
+									{
+										rider->pushedV = platformPhys->vel.y;
+									}
+									rider->lastVel = platformPhys->vel;
+								}
+								/*
 								ivec2 centerFoot = {tx->pos.x, tx->pos.y - 0x200};
+
 								if (PointInAABB(centerFoot, {platformTx->pos.x + platform->bl.x, 
 											platformTx->pos.y + platform->bl.y}, 
 											{platformTx->pos.x + platform->ur.x, 
 											platformTx->pos.y + platform->ur.y}))
 								{
 									ridingPlatform = true;
-									auto platformPhy = &GameComponents.physics[j];
 									if (rider->platformID == -1)
 									{
 										//store the platform information into the rider
 										auto riderPhy = &GameComponents.physics[i];
-										riderPhy->vel -= platformPhy->vel;
+										riderPhy->vel -= platformPhys->vel;
 										rider->platformID = GameComponents.idIndex[j];
 									}
-									tx->pos += platformPhy->vel;
-									rider->lastVel = platformPhy->vel;
+									tx->pos += platformPhys->vel;
+									if (platformPhys->vel.y > 0)
+									{
+										rider->pushedV = platformPhys->vel.y;
+									}
+									rider->lastVel = platformPhys->vel;
+								}
+								*/
+
+								plT = platformTx->pos.y + platform->ur.y + platformPhys->vel.y;
+								plB = platformTx->pos.y + platform->bl.y + platformPhys->vel.y;
+								plL = platformTx->pos.x + platform->bl.x + platformPhys->vel.x;
+								plR = platformTx->pos.x + platform->ur.x + platformPhys->vel.x;
+								riderT = tx->pos.y + rider->size.y;
+								riderB = tx->pos.y;
+								riderL = tx->pos.x - (rider->size.x >> 1);
+								riderR = tx->pos.x + (rider->size.x >> 1);
+
+								if (riderT > plB && riderB < plT && riderL < plR && riderR > plL)
+								{
+									int overlapT = -(riderT - plB);
+									int overlapB = (plT - riderB);
+									int overlapV = 0;
+									if (Abs(overlapT) < Abs(overlapB))
+										overlapV = overlapT;
+									else
+										overlapV = overlapB;
+
+									int overlapH = 0;
+									if (platformPhys->vel.x < 0)
+										overlapH = -(riderR - plL);
+									else if (platformPhys->vel.x > 0)
+										overlapH = (plR - riderL);
+
+									if (Abs(overlapH) < Abs(overlapV))
+									{
+										tx->pos.x += overlapH;
+										rider->pushedH = overlapH;
+									}
+									else
+									{
+										tx->pos.y += overlapV;
+										rider->pushedV = overlapV;
+									}
 								}
 							}
 						}
