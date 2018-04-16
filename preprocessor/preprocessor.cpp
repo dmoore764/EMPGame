@@ -54,8 +54,14 @@
 #define internal_function static
 #define local_persistent static
 
+#define DEGREES_TO_RADIANS 1
+#define RADIANS_TO_DEGREES 1
 
+#define GENERIC_CALLBACK(Name) void Name(void *data)
+typedef GENERIC_CALLBACK(generic_callback);
 
+#include "../src/file_record.h"
+#include "../src/game_math.h"
 #include "../src/file_utilities.h"
 #include "../src/debug_output.h"
 #include "../src/memory_arena.h"
@@ -95,7 +101,7 @@ void PrintCStruct(json_data_file *cmp, FILE *file)
 {
 	assert(cmp->val->type == JSON_HASH);
 	char className[128];
-	strlwr(className, cmp->file->basename);
+	strlwr(className, cmp->baseName);
 	char cmpName[128];
 	sprintf(cmpName, "cmp_%s", className);
 
@@ -497,7 +503,7 @@ int main (int argcount, char **args)
 		{
 			json_data_file *cmp = (json_data_file *)value;
 			char file_base[128];
-			strupr(file_base, cmp->file->basename);
+			strupr(file_base, cmp->baseName);
 			components[numComponents++] = cmp;
 			HashGetNext(&Components, NULL, NULL, &value, iter);
 		}
@@ -560,19 +566,19 @@ int main (int argcount, char **args)
 
 	//print out the SOA component struct
 	{
-		FW("struct game_components");
+		FW("struct game_object");
 		FW("{");
-		FW("    uint32_t idIndex[MAX_GAME_OBJECTS];");
-		FW("    object_type type[MAX_GAME_OBJECTS];");
-		FW("    cmp_metadata metadata[MAX_GAME_OBJECTS];");
+		FW("    bool inUse;");
+		FW("    object_type type;");
+		FW("    cmp_metadata metadata;");
 
 		for (int i = 0; i < numComponents; i++)
 		{
 			char memberName[128];
-			strlwr(memberName, components[i]->file->basename);
+			strlwr(memberName, components[i]->baseName);
 			char cmpName[128];
 			sprintf(cmpName, "cmp_%s", memberName);
-			FW("    %s %s[MAX_GAME_OBJECTS];", cmpName, memberName);
+			FW("    %s %s;", cmpName, memberName);
 		}
 
 		FW("};");
@@ -580,96 +586,55 @@ int main (int argcount, char **args)
 
 
 	{
-		FW("global_variable game_components GameComponents;");
+		FW("global_variable game_object GameObjects[MAX_GAME_OBJECTS];");
 		FW("global_variable int NumGameObjects;");
 		FW("");
 		FW("");
-		FW("//the game object is a index into the arrays of components");
-		FW("struct GameObjectId");
-		FW("{");
-		FW("    bool inUse;");
-		FW("    uint32_t index;");
-		FW("};");
-		FW("global_variable GameObjectId GameObjectIDs[MAX_GAME_OBJECTS];");
-		FW("");
-		FW("//stores the top most used id (could be free spots below this number though)");
-		FW("global_variable int idCount;");
-		FW("");
-		FW("//add an object by finding the first free slot, the returned integer");
-		FW("//would never change for the life of the object (but the index into the");
-		FW("//gameObjects will)");
 		FW("int AddObject(object_type type)");
 		FW("{");
-		FW("    int result = -1;");
-		FW("    for (int i = 0; i < idCount; i++)");
+		FW("    int index = NumGameObjects;");
+		FW("    for (int i = 0; i < NumGameObjects; i++)");
 		FW("    {");
-		FW("        if (!GameObjectIDs[i].inUse)");
+		FW("        if (!GameObjects[i].inUse)");
 		FW("        {");
-		FW("            result = i;");
+		FW("            index = i;");
 		FW("            break;");
 		FW("        }");
 		FW("    }");
 		FW("    ");
-		FW("    //The list of game objects up to idCount is full, so add at the end");
-		FW("    if (result == -1)");
-		FW("        result = idCount++;");
+		FW("    if (index == NumGameObjects)");
+		FW("        NumGameObjects++;");
 		FW("    ");
-		FW("    assert(result < MAX_GAME_OBJECTS);");
+		FW("    assert(NumGameObjects < MAX_GAME_OBJECTS);");
 		FW("    ");
-		FW("    GameObjectIDs[result].inUse = true;");
-		FW("    GameObjectIDs[result].index = NumGameObjects++;");
+		FW("    game_object *go = &GameObjects[index];");
+		FW("    go->inUse = true;");
 		FW("    ");
-		FW("    GameComponents.type[NumGameObjects-1] = type;");
-		FW("    GameComponents.idIndex[NumGameObjects-1] = result;");
-		FW("    GameComponents.metadata[NumGameObjects-1] = {};");
+		FW("    go->type = type;");
+		FW("    go->metadata = {};");
 
 		for (int i = 0; i < numComponents; i++)
 		{
 			char memberName[128];
-			strlwr(memberName, components[i]->file->basename);
-			FW("    GameComponents.%s[NumGameObjects-1] = {};", memberName);
+			strlwr(memberName, components[i]->baseName);
+			FW("    go->%s = {};", memberName);
 		}
 		FW("    ");
-		FW("    return result;");
+		FW("    return index;");
 		FW("}");
 		FW("");
 		FW("void _RemoveObject(int id)");
 		FW("{");
-		FW("    if (id == idCount-1)");
-		FW("        idCount--;");
+		FW("    GameObjects[id].inUse = false;");
+		FW("    if (id == NumGameObjects-1)");
+		FW("        NumGameObjects--;");
 		FW("    ");
-		FW("    GameObjectId *goID = &GameObjectIDs[id];");
-		FW("    ");
-		FW("    if (goID->index != NumGameObjects-1)");
-		FW("    {");
-		FW("        int idIndex = GameComponents.idIndex[NumGameObjects-1];");
-		FW("    ");
-		FW("        //move around the objects so the list of components is compact");
-		FW("        GameComponents.idIndex[goID->index] = GameComponents.idIndex[NumGameObjects-1];");
-		FW("        GameComponents.type[goID->index] = GameComponents.type[NumGameObjects-1];");
-		FW("        GameComponents.metadata[goID->index] = GameComponents.metadata[NumGameObjects-1];");
-
-		for (int i = 0; i < numComponents; i++)
-		{
-			char memberName[128];
-			strlwr(memberName, components[i]->file->basename);
-			FW("        GameComponents.%s[goID->index] = GameComponents.%s[NumGameObjects-1];", memberName, memberName);
-		}
-		FW("        ");
-		FW("        //if we swapped, update the index into the component lists");
-		FW("        GameObjectIDs[idIndex].index = goID->index;");
-		FW("    }");
-		FW("    ");
-		FW("    //the list of object components gets packed down");
-		FW("    NumGameObjects--;");
-		FW("    ");
-		FW("    goID->inUse = false;");
 		FW("}");
 		FW("");
 		FW("");
 
-		FW("#define GO(component) (&GameComponents.component[GameObjectIDs[goId].index])");
-		FW("#define OTH(id, component) (&GameComponents.component[GameObjectIDs[id].index])");
+		FW("#define GO(component) (&GameObjects[goId].component)");
+		FW("#define OTH(id, component) (&GameObjects[id].component)");
 		FW("");
 		FW("");
 
@@ -686,7 +651,7 @@ int main (int argcount, char **args)
 		for (int i = 0; i < numComponents; i++)
 		{
 			char className[128];
-			strlwr(className, components[i]->file->basename);
+			strlwr(className, components[i]->baseName);
 
 			FW("    if (meta->cmpInUse & %s)", components[i]->val->hash->GetByKey("name")->string);
 			FW("    {");
@@ -777,7 +742,7 @@ int main (int argcount, char **args)
 		for (int i = 0; i < numComponents; i++)
 		{
 			char memberName[128];
-			strlwr(memberName, components[i]->file->basename);
+			strlwr(memberName, components[i]->baseName);
 			char cmpName[128];
 			sprintf(cmpName, "cmp_%s", memberName);
 

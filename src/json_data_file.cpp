@@ -8,7 +8,7 @@ void ReadInJsonDataFromDirectory(void *datapak, const char *directory, generic_h
 		if (strcmp(directory, fr->folderName) == 0)
 		{
 			char basename[64];
-			sprintf(basename, "%.*s", strlen(fr->fileName) - 5, fr->fileName);
+			sprintf(basename, "%.*s", (int)(strlen(fr->fileName) - 5), fr->fileName);
 			char ext[5];
 			sprintf(ext, "%s", fr->fileName + strlen(fr->fileName) - 4);
 

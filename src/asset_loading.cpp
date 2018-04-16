@@ -843,3 +843,4 @@ void AsyncLoadImageFiles(char **fileNames, int numFiles, generic_callback *callb
 		ERR("Error - pthread_create() return code: %d", iret1);
 	}
 }
+

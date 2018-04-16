@@ -15,14 +15,18 @@ void CollisionUpdate(int goId)
 
 	for (int i = 0; i < NumGameObjects; i++)
 	{
-		auto meta = &GameComponents.metadata[i];
-		if (GameComponents.idIndex[i] != goId && (meta->cmpInUse & COLLIDER) && (meta->cmpInUse & TRANSFORM))
+		game_object *go = &GameObjects[i];
+		if (!go->inUse)
+			continue;
+
+		auto meta = &go->metadata;
+		if (i != goId && (meta->cmpInUse & COLLIDER) && (meta->cmpInUse & TRANSFORM))
 		{
-			auto othCollider = &GameComponents.collider[i];
+			auto othCollider = &go->collider;
 			
 			if ((collider->mask & othCollider->category) && (collider->category & othCollider->mask))
 			{
-				auto othTx = &GameComponents.transform[i];
+				auto othTx = &go->transform;
 				int othMinX = othTx->pos.x + othCollider->bl.x;
 				int othMinY = othTx->pos.y + othCollider->bl.y;
 				int othMaxX = othTx->pos.x + othCollider->ur.x;
@@ -30,7 +34,7 @@ void CollisionUpdate(int goId)
 
 				if (minX <= othMaxX && maxX >= othMinX && minY <= othMaxY && maxY >= othMinY)
 				{
-					collider->collisions[collisionCount++] = GameComponents.idIndex[i];
+					collider->collisions[collisionCount++] = i;
 					if (collisionCount == 4)
 						return;
 				}

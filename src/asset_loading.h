@@ -22,7 +22,6 @@ struct image_file
 image_file LoadImageFile(char *fileName);
 void FreeImageFile(image_file *img);
 
-
 struct async_load_image_result
 {
 	image_file *files;

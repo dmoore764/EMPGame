@@ -212,11 +212,13 @@ struct cmp_sprite
     uint32_t color;
 };
 
+
+
 struct game_object
 {
-	bool inUse;
-	object_type type;
-	cmp_metadata metadata;
+    bool inUse;
+    object_type type;
+    cmp_metadata metadata;
     cmp_draw_editor_gui draw_editor_gui;
     cmp_draw_game_gui draw_game_gui;
     cmp_parent parent;
@@ -236,28 +238,29 @@ struct game_object
     cmp_moving_platform moving_platform;
     cmp_sprite sprite;
 };
-
 global_variable game_object GameObjects[MAX_GAME_OBJECTS];
 global_variable int NumGameObjects;
 
+
 int AddObject(object_type type)
 {
-	int index = NumGameObjects;
-	for (int i = 0; i < NumGameObjects; i++)
-	{
-		if (!GameObjects[i].inUse)
-		{
-			index = i;
-			break;
-		}
-	}
-	if (index == NumGameObjects)
-		NumGameObjects++;
-
+    int index = NumGameObjects;
+    for (int i = 0; i < NumGameObjects; i++)
+    {
+        if (!GameObjects[i].inUse)
+        {
+            index = i;
+            break;
+        }
+    }
+    
+    if (index == NumGameObjects)
+        NumGameObjects++;
+    
     assert(NumGameObjects < MAX_GAME_OBJECTS);
-
-	game_object *go = &GameObjects[index];
-	go->inUse = true;
+    
+    game_object *go = &GameObjects[index];
+    go->inUse = true;
     
     go->type = type;
     go->metadata = {};
@@ -285,14 +288,16 @@ int AddObject(object_type type)
 
 void _RemoveObject(int id)
 {
-	GameObjects[id].inUse = false;
-	if (id == NumGameObjects-1)
-		NumGameObjects--;
+    GameObjects[id].inUse = false;
+    if (id == NumGameObjects-1)
+        NumGameObjects--;
+    
 }
 
 
 #define GO(component) (&GameObjects[goId].component)
 #define OTH(id, component) (&GameObjects[id].component)
+
 
 void InitObject(int goId)
 {

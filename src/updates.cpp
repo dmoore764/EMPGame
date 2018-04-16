@@ -145,10 +145,14 @@ GET_CAMERA_FOCUS(PlayerFocus)
 
 	for (int i = 0; i < NumGameObjects; i++)
 	{
-		if (GameComponents.type[i] == OBJ_PLAYER)
+		game_object *go = &GameObjects[i];
+		if (!go->inUse)
+			continue;
+
+		if (go->type == OBJ_PLAYER)
 		{
-			auto tx = &GameComponents.transform[i];
-			auto phy = &GameComponents.physics[i];
+			auto tx = &go->transform;
+			auto phy = &go->physics;
 			result.x = tx->pos.x + Sign(tx->scale.x) * (10 << 9) + (phy->vel.x << 3);
 			result.y = tx->pos.y + (35 << 9) + (phy->vel.y < 0 ? (phy->vel.y << 5) : 0);
 			break;
@@ -1383,14 +1387,15 @@ void PlatformTest(int goId, test_point *points, int numPoints)
 
 	for (int j = 0; j < NumGameObjects; j++)
 	{
-		if (GameComponents.idIndex[j] == goId)
+		game_object *go = &GameObjects[j];
+		if (goId == j || !go->inUse)
 			continue;
 
-		auto meta = &GameComponents.metadata[j];
+		auto meta = &go->metadata;
 		if ((meta->cmpInUse & MOVING_PLATFORM) && (meta->cmpInUse & TRANSFORM))
 		{
-			auto platform = &GameComponents.moving_platform[j];
-			auto platformTx = &GameComponents.transform[j];
+			auto platform = &go->moving_platform;
+			auto platformTx = &go->transform;
 			uint32_t platXL = platformTx->pos.x + platform->bl.x;
 			uint32_t platXR = platformTx->pos.x + platform->ur.x;
 			uint32_t platYB = platformTx->pos.y + platform->bl.y;
@@ -1416,7 +1421,7 @@ void PlatformTest(int goId, test_point *points, int numPoints)
 							{
 								points[i].limit = platformTx->pos.y + platform->bl.y;
 								points[i].normal = {0,-1};
-								points[i].platformID = GameComponents.idIndex[j];
+								points[i].platformID = j;
 							}
 						} break;
 						case POINT_BOTTOM: 
@@ -1425,7 +1430,7 @@ void PlatformTest(int goId, test_point *points, int numPoints)
 							{
 								points[i].limit = (platformTx->pos.y + platform->ur.y); 
 								points[i].normal = {0,1};
-								points[i].platformID = GameComponents.idIndex[j];
+								points[i].platformID = j;
 							}
 						} break;
 						case POINT_RIGHT: 
@@ -1434,7 +1439,7 @@ void PlatformTest(int goId, test_point *points, int numPoints)
 							{
 								points[i].limit = platformTx->pos.x + platform->bl.x;
 								points[i].normal = {-1,0};
-								points[i].platformID = GameComponents.idIndex[j];
+								points[i].platformID = j;
 							}
 						} break;
 						case POINT_LEFT: 
@@ -1443,7 +1448,7 @@ void PlatformTest(int goId, test_point *points, int numPoints)
 							{
 								points[i].limit = platformTx->pos.x + platform->ur.x;
 								points[i].normal = {1,0};
-								points[i].platformID = GameComponents.idIndex[j];
+								points[i].platformID = j;
 							}
 						} break;
 					}
@@ -3054,7 +3059,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 		int othID = collider->collisions[i];
 		if (othID != -1)
 		{
-			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			object_type type = GameObjects[othID].type;
 			switch (type)
 			{
 				case OBJ_DOOR:
@@ -4060,7 +4065,7 @@ UPDATE_FUNCTION(ArrowUpdate)
 			int othID = collider->collisions[i];
 			if (othID != -1)
 			{
-				object_type type = GameComponents.type[GameObjectIDs[othID].index];
+				object_type type = GameObjects[othID].type;
 				switch (type)
 				{
 					case OBJ_PLAYER:
@@ -4354,7 +4359,7 @@ UPDATE_FUNCTION(StandinUpdate)
 		int othID = collider->collisions[i];
 		if (othID != -1)
 		{
-			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			object_type type = GameObjects[othID].type;
 			switch (type)
 			{
 				case OBJ_KNOCKBACK:
@@ -4516,7 +4521,7 @@ UPDATE_FUNCTION(JumperUpdate)
 		int othID = collider->collisions[i];
 		if (othID != -1)
 		{
-			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			object_type type = GameObjects[othID].type;
 			switch (type)
 			{
 				case OBJ_SWORD_SWIPE:
@@ -4721,7 +4726,7 @@ UPDATE_FUNCTION(SwooperUpdate)
 		int othID = collider->collisions[i];
 		if (othID != -1)
 		{
-			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			object_type type = GameObjects[othID].type;
 			switch (type)
 			{
 				case OBJ_SWORD_SWIPE:
@@ -5208,9 +5213,9 @@ UPDATE_FUNCTION(LevelLoader)
 
 				{
 					//remove any old objects
-					for (int i = 0; i < idCount; i++)
+					for (int i = 0; i < NumGameObjects; i++)
 					{
-						if (GameObjectIDs[i].inUse && (OTH(i,metadata)->flags & GAME_OBJECT))
+						if (GameObjects[i].inUse && (OTH(i,metadata)->flags & GAME_OBJECT))
 						{
 							RemoveObject(i);
 						}

@@ -249,20 +249,28 @@ int main(int arg_count, char **args)
 			{
 				for (int i = 0; i < NumGameObjects; i++)
 				{
-					auto meta = &GameComponents.metadata[i];
+					game_object *go = &GameObjects[i];
+					if (!go->inUse)
+						continue;
+
+					auto meta = &go->metadata;
 					if ((meta->cmpInUse & RIDES_PLATFORMS) && (meta->cmpInUse & TRANSFORM))
 					{
 						bool ridingPlatform = false;
-						auto rider = &GameComponents.rides_platforms[i];
-						auto tx = &GameComponents.transform[i];
+						auto rider = &go->rides_platforms;
+						auto tx = &go->transform;
 						for (int j = 0; j < NumGameObjects; j++)
 						{
-							auto platformMeta = &GameComponents.metadata[j];
+							game_object *oth = &GameObjects[j];
+							if (!oth->inUse)
+								continue;
+
+							auto platformMeta = &oth->metadata;
 							if ((platformMeta->cmpInUse & MOVING_PLATFORM) && (platformMeta->cmpInUse & TRANSFORM) && (platformMeta->cmpInUse & PHYSICS))
 							{
-								auto platform = &GameComponents.moving_platform[j];
-								auto platformTx = &GameComponents.transform[j];
-								auto platformPhys = &GameComponents.physics[j];
+								auto platform = &oth->moving_platform;
+								auto platformTx = &oth->transform;
+								auto platformPhys = &oth->physics;
 
 								int plT = platformTx->pos.y + platform->ur.y + platformPhys->vel.y;
 								int plB = platformTx->pos.y + platform->bl.y + platformPhys->vel.y;
@@ -279,9 +287,9 @@ int main(int arg_count, char **args)
 									if (rider->platformID == -1)
 									{
 										//store the platform information into the rider
-										auto riderPhy = &GameComponents.physics[i];
+										auto riderPhy = &go->physics;
 										riderPhy->vel -= platformPhys->vel;
-										rider->platformID = GameComponents.idIndex[j];
+										rider->platformID = j;
 									}
 									tx->pos += platformPhys->vel;
 									if (platformPhys->vel.y > 0)
@@ -356,7 +364,7 @@ int main(int arg_count, char **args)
 						if (!ridingPlatform && rider->platformID != -1)
 						{
 							//add the velocity to the rider's physics once separated
-							auto riderPhy = &GameComponents.physics[i];
+							auto riderPhy = &go->physics;
 							riderPhy->vel += rider->lastVel;
 							rider->platformID = -1;
 						}
@@ -364,17 +372,21 @@ int main(int arg_count, char **args)
 				}
 			}
 
-			//update all transforms
 			for (int i = 0; i < NumGameObjects; i++)
 			{
-				auto meta = &GameComponents.metadata[i];
+				game_object *go = &GameObjects[i];
+				if (!go->inUse)
+					continue;
 
+				auto meta = &go->metadata;
+
+				//update all transforms
 				if (!(meta->flags & GAME_OBJECT) || (SendingGameUpdateEvents && (meta->flags & GAME_OBJECT)))
 				{
 					if ((meta->cmpInUse & PHYSICS) && (meta->cmpInUse & TRANSFORM))
 					{
-						auto tx = &GameComponents.transform[i];
-						auto phys = &GameComponents.physics[i];
+						auto tx = &go->transform;
+						auto phys = &go->physics;
 
 						phys->vel += phys->accel;
 						tx->pos += phys->vel;
@@ -386,9 +398,13 @@ int main(int arg_count, char **args)
 			//Check for all collisions
 			for (int i = 0; i < NumGameObjects; i++)
 			{
-				auto meta = &GameComponents.metadata[i];
+				game_object *go = &GameObjects[i];
+				if (!go->inUse)
+					continue;
+
+				auto meta = &go->metadata;
 				if ((meta->cmpInUse & COLLIDER) && (meta->cmpInUse & TRANSFORM))
-					CollisionUpdate(GameComponents.idIndex[i]);
+					CollisionUpdate(i);
 			}
 
 
@@ -397,32 +413,36 @@ int main(int arg_count, char **args)
 
 			for (int i = 0; i < NumGameObjects; i++)
 			{
-				auto meta = &GameComponents.metadata[i];
+				game_object *go = &GameObjects[i];
+				if (!go->inUse)
+					continue;
+
+				auto meta = &go->metadata;
 
 				if (!(meta->flags & GAME_OBJECT) || (SendingGameUpdateEvents && (meta->flags & GAME_OBJECT)))
 				{
 					if ((meta->cmpInUse & ANIM) && (meta->cmpInUse & SPRITE))
-						AnimationUpdate(GameComponents.idIndex[i]);
+						AnimationUpdate(i);
 
 					if (meta->cmpInUse & UPDATE)
 					{
-						auto update = &GameComponents.update[i];
-						update->update(GameComponents.idIndex[i]);
+						auto update = &go->update;
+						update->update(i);
 					}
 				}
 
 				if (meta->cmpInUse & SPECIAL_DRAW)
 				{
-					auto draw = &GameComponents.special_draw[i];
+					auto draw = &go->special_draw;
 					draw_object *obj = &objectsToDraw[numObjectsToDraw++];
 					obj->depth = draw->depth;
 					obj->draw = draw->draw;
-					obj->goId = GameComponents.idIndex[i];
+					obj->goId = i;
 				}
 				else if ((meta->cmpInUse & TRANSFORM) && (meta->cmpInUse & SPRITE))
 				{
-					auto sprite = &GameComponents.sprite[i];
-					auto tx = &GameComponents.transform[i];
+					auto sprite = &go->sprite;
+					auto tx = &go->transform;
 
 					draw_object *obj = &objectsToDraw[numObjectsToDraw++];
 					obj->depth = sprite->depth;
@@ -464,11 +484,15 @@ int main(int arg_count, char **args)
 
 			for (int i = 0; i < NumGameObjects; i++)
 			{
-				auto meta = &GameComponents.metadata[i];
+				game_object *go = &GameObjects[i];
+				if (!go->inUse)
+					continue;
+
+				auto meta = &go->metadata;
 				if (meta->cmpInUse & DRAW_GAME_GUI)
 				{
-					auto draw = &GameComponents.draw_game_gui[i];
-					draw->draw(GameComponents.idIndex[i]);
+					auto draw = OTH(i, draw_game_gui);
+					draw->draw(i);
 				}
 			}
 
@@ -482,11 +506,15 @@ int main(int arg_count, char **args)
 
 			for (int i = 0; i < NumGameObjects; i++)
 			{
-				auto meta = &GameComponents.metadata[i];
+				game_object *go = &GameObjects[i];
+				if (!go->inUse)
+					continue;
+
+				auto meta = &go->metadata;
 				if (meta->cmpInUse & DRAW_EDITOR_GUI)
 				{
-					auto draw = &GameComponents.draw_editor_gui[i];
-					draw->draw(GameComponents.idIndex[i]);
+					auto draw = OTH(i, draw_editor_gui);
+					draw->draw(i);
 				}
 			}
 

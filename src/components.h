@@ -39,9 +39,10 @@ int GetFirstOfType(object_type type)
 	int result = -1;
 	for (int i = 0; i < NumGameObjects; i++)
 	{
-		if (GameComponents.type[i] == type)
+		game_object *go = &GameObjects[i];
+		if (go->inUse && go->type == type)
 		{
-			result = GameComponents.idIndex[i];
+			result = i;
 			break;
 		}
 	}
