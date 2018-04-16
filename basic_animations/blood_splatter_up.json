@@ -1,0 +1,6 @@
+[
+	{ "time" : 0.03,		"sprite" : "BloodSplatterUp1" },
+	{ "time" : 0.03,		"sprite" : "BloodSplatterUp2" },
+	{ "time" : 0.10,		"sprite" : "BloodSplatterUp3" },
+	{ "time" : 0.20,		"sprite" : "BloodSplatterUp4" },
+]

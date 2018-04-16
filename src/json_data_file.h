@@ -1,6 +1,7 @@
 struct json_data_file
 {
-	dir_file *file;
+	char *baseName;
+	char *fileName;
 	json_value *val;
 	void *additional_data;
 };

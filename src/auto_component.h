@@ -3,6 +3,10 @@ enum object_type
     OBJ_NONE,
     OBJ_DIALOGUE_BOX,
     OBJ_PLAYER,
+    OBJ_HEALTH_BAR,
+    OBJ_KNOCKBACK,
+    OBJ_SWORD_SWIPE,
+    OBJ_DUST,
     OBJ_CRYSTAL_GENERATOR,
     OBJ_GENERATOR_DISPLAY,
     OBJ_UPGRADE_PANEL,
@@ -13,6 +17,7 @@ enum object_type
     OBJ_BASIC_BULLET_DRAWER,
     OBJ_GAME_CAMERA,
     OBJ_ROCK,
+    OBJ_DOOR,
     OBJ_RAIN_GENERATOR,
     OBJ_LEVEL_LOADER,
     OBJ_LEVEL_SAVER,
@@ -25,44 +30,36 @@ enum object_type
     OBJ_PREFAB_MOVER,
     OBJ_PREFAB_PLACER,
     OBJ_LEVEL_SELECTOR,
+    OBJ_EDIT_OBJECTS,
+    OBJ_DEBUG_FUNCTIONS,
+    OBJ_STANDIN,
+    OBJ_ENEMY_JUMPER,
+    OBJ_ENEMY_PROJECTILE,
+    OBJ_ENEMY_SWORD_SWIPE,
+    OBJ_ENEMY_SWOOPER,
 };
 
 
 enum component_type {
     METADATA,
-    ANIM = 0x1,
-    CUSTOM_FLAGS = 0x2,
-    DRAW_EDITOR_GUI = 0x4,
-    DRAW_GAME_GUI = 0x8,
-    PHYSICS = 0x10,
-    RIDES_PLATFORMS = 0x20,
-    TRANSFORM = 0x40,
-    UPDATE = 0x80,
-    COLLIDER = 0x100,
-    SPECIAL_DRAW = 0x200,
-    DIALOG = 0x400,
-    COUNTERS = 0x800,
-    MOVING_PLATFORM = 0x1000,
-    SPRITE = 0x2000,
-};
-
-
-struct cmp_anim
-{
-    //serialized members
-    char * name;
-    bool playing;
-    bool loop;
-    float speedFactor;
-    float frameTime;
-    int currentFrame;
-};
-
-
-struct cmp_custom_flags
-{
-    //serialized members
-    uint32_t bits;
+    DRAW_EDITOR_GUI = 0x1,
+    DRAW_GAME_GUI = 0x2,
+    PARENT = 0x4,
+    PHYSICS = 0x8,
+    RIDES_PLATFORMS = 0x10,
+    SAVE_AND_LOAD = 0x20,
+    STRING_STORAGE = 0x40,
+    TRANSFORM = 0x80,
+    UPDATE = 0x100,
+    WAYPOINTS = 0x200,
+    ANIM = 0x400,
+    CUSTOM_FLAGS = 0x800,
+    COLLIDER = 0x1000,
+    SPECIAL_DRAW = 0x2000,
+    DIALOG = 0x4000,
+    COUNTERS = 0x8000,
+    MOVING_PLATFORM = 0x10000,
+    SPRITE = 0x20000,
 };
 
 
@@ -77,6 +74,14 @@ struct cmp_draw_game_gui
 {
     //nonSerialized members
     update_function * draw;
+};
+
+
+struct cmp_parent
+{
+    //nonSerialized members
+    int parentID;
+    ivec2 offset;
 };
 
 
@@ -99,6 +104,20 @@ struct cmp_rides_platforms
 };
 
 
+struct cmp_save_and_load
+{
+    //nonSerialized members
+    update_function * in_out;
+};
+
+
+struct cmp_string_storage
+{
+    //nonSerialized members
+    char * string;
+};
+
+
 struct cmp_transform
 {
     //serialized members
@@ -113,6 +132,33 @@ struct cmp_update
 {
     //nonSerialized members
     update_function * update;
+};
+
+
+struct cmp_waypoints
+{
+    //serialized members
+    int count;
+    ivec2 points[3];
+};
+
+
+struct cmp_anim
+{
+    //serialized members
+    char * name;
+    bool playing;
+    bool loop;
+    float speedFactor;
+    float frameTime;
+    int currentFrame;
+};
+
+
+struct cmp_custom_flags
+{
+    //serialized members
+    uint32_t bits;
 };
 
 
@@ -146,6 +192,7 @@ struct cmp_counters
 {
     //serialized members
     uint32_t counters;
+    uint32_t counters2;
 };
 
 
@@ -165,136 +212,143 @@ struct cmp_sprite
     uint32_t color;
 };
 
-
-
-struct game_components
+struct game_object
 {
-    uint32_t idIndex[MAX_GAME_OBJECTS];
-    object_type type[MAX_GAME_OBJECTS];
-    cmp_metadata metadata[MAX_GAME_OBJECTS];
-    cmp_anim anim[MAX_GAME_OBJECTS];
-    cmp_custom_flags custom_flags[MAX_GAME_OBJECTS];
-    cmp_draw_editor_gui draw_editor_gui[MAX_GAME_OBJECTS];
-    cmp_draw_game_gui draw_game_gui[MAX_GAME_OBJECTS];
-    cmp_physics physics[MAX_GAME_OBJECTS];
-    cmp_rides_platforms rides_platforms[MAX_GAME_OBJECTS];
-    cmp_transform transform[MAX_GAME_OBJECTS];
-    cmp_update update[MAX_GAME_OBJECTS];
-    cmp_collider collider[MAX_GAME_OBJECTS];
-    cmp_special_draw special_draw[MAX_GAME_OBJECTS];
-    cmp_dialog dialog[MAX_GAME_OBJECTS];
-    cmp_counters counters[MAX_GAME_OBJECTS];
-    cmp_moving_platform moving_platform[MAX_GAME_OBJECTS];
-    cmp_sprite sprite[MAX_GAME_OBJECTS];
+	bool inUse;
+	object_type type;
+	cmp_metadata metadata;
+    cmp_draw_editor_gui draw_editor_gui;
+    cmp_draw_game_gui draw_game_gui;
+    cmp_parent parent;
+    cmp_physics physics;
+    cmp_rides_platforms rides_platforms;
+    cmp_save_and_load save_and_load;
+    cmp_string_storage string_storage;
+    cmp_transform transform;
+    cmp_update update;
+    cmp_waypoints waypoints;
+    cmp_anim anim;
+    cmp_custom_flags custom_flags;
+    cmp_collider collider;
+    cmp_special_draw special_draw;
+    cmp_dialog dialog;
+    cmp_counters counters;
+    cmp_moving_platform moving_platform;
+    cmp_sprite sprite;
 };
-global_variable game_components GameComponents;
+
+global_variable game_object GameObjects[MAX_GAME_OBJECTS];
 global_variable int NumGameObjects;
 
-
-//the game object is a index into the arrays of components
-struct GameObjectId
-{
-    bool inUse;
-    uint32_t index;
-};
-global_variable GameObjectId GameObjectIDs[MAX_GAME_OBJECTS];
-
-//stores the top most used id (could be free spots below this number though)
-global_variable int idCount;
-
-//add an object by finding the first free slot, the returned integer
-//would never change for the life of the object (but the index into the
-//gameObjects will)
 int AddObject(object_type type)
 {
-    int result = -1;
-    for (int i = 0; i < idCount; i++)
-    {
-        if (!GameObjectIDs[i].inUse)
-        {
-            result = i;
-            break;
-        }
-    }
+	int index = NumGameObjects;
+	for (int i = 0; i < NumGameObjects; i++)
+	{
+		if (!GameObjects[i].inUse)
+		{
+			index = i;
+			break;
+		}
+	}
+	if (index == NumGameObjects)
+		NumGameObjects++;
+
+    assert(NumGameObjects < MAX_GAME_OBJECTS);
+
+	game_object *go = &GameObjects[index];
+	go->inUse = true;
     
-    //The list of game objects up to idCount is full, so add at the end
-    if (result == -1)
-        result = idCount++;
+    go->type = type;
+    go->metadata = {};
+    go->draw_editor_gui = {};
+    go->draw_game_gui = {};
+    go->parent = {};
+    go->physics = {};
+    go->rides_platforms = {};
+    go->save_and_load = {};
+    go->string_storage = {};
+    go->transform = {};
+    go->update = {};
+    go->waypoints = {};
+    go->anim = {};
+    go->custom_flags = {};
+    go->collider = {};
+    go->special_draw = {};
+    go->dialog = {};
+    go->counters = {};
+    go->moving_platform = {};
+    go->sprite = {};
     
-    assert(result < MAX_GAME_OBJECTS);
-    
-    GameObjectIDs[result].inUse = true;
-    GameObjectIDs[result].index = NumGameObjects++;
-    
-    GameComponents.type[NumGameObjects-1] = type;
-    GameComponents.idIndex[NumGameObjects-1] = result;
-    GameComponents.metadata[NumGameObjects-1] = {};
-    GameComponents.anim[NumGameObjects-1] = {};
-    GameComponents.custom_flags[NumGameObjects-1] = {};
-    GameComponents.draw_editor_gui[NumGameObjects-1] = {};
-    GameComponents.draw_game_gui[NumGameObjects-1] = {};
-    GameComponents.physics[NumGameObjects-1] = {};
-    GameComponents.rides_platforms[NumGameObjects-1] = {};
-    GameComponents.transform[NumGameObjects-1] = {};
-    GameComponents.update[NumGameObjects-1] = {};
-    GameComponents.collider[NumGameObjects-1] = {};
-    GameComponents.special_draw[NumGameObjects-1] = {};
-    GameComponents.dialog[NumGameObjects-1] = {};
-    GameComponents.counters[NumGameObjects-1] = {};
-    GameComponents.moving_platform[NumGameObjects-1] = {};
-    GameComponents.sprite[NumGameObjects-1] = {};
-    
-    return result;
+    return index;
 }
 
 void _RemoveObject(int id)
 {
-    if (id == idCount-1)
-        idCount--;
-    
-    GameObjectId *goID = &GameObjectIDs[id];
-    
-    if (goID->index != NumGameObjects-1)
-    {
-        int idIndex = GameComponents.idIndex[NumGameObjects-1];
-    
-        //move around the objects so the list of components is compact
-        GameComponents.idIndex[goID->index] = GameComponents.idIndex[NumGameObjects-1];
-        GameComponents.type[goID->index] = GameComponents.type[NumGameObjects-1];
-        GameComponents.metadata[goID->index] = GameComponents.metadata[NumGameObjects-1];
-        GameComponents.anim[goID->index] = GameComponents.anim[NumGameObjects-1];
-        GameComponents.custom_flags[goID->index] = GameComponents.custom_flags[NumGameObjects-1];
-        GameComponents.draw_editor_gui[goID->index] = GameComponents.draw_editor_gui[NumGameObjects-1];
-        GameComponents.draw_game_gui[goID->index] = GameComponents.draw_game_gui[NumGameObjects-1];
-        GameComponents.physics[goID->index] = GameComponents.physics[NumGameObjects-1];
-        GameComponents.rides_platforms[goID->index] = GameComponents.rides_platforms[NumGameObjects-1];
-        GameComponents.transform[goID->index] = GameComponents.transform[NumGameObjects-1];
-        GameComponents.update[goID->index] = GameComponents.update[NumGameObjects-1];
-        GameComponents.collider[goID->index] = GameComponents.collider[NumGameObjects-1];
-        GameComponents.special_draw[goID->index] = GameComponents.special_draw[NumGameObjects-1];
-        GameComponents.dialog[goID->index] = GameComponents.dialog[NumGameObjects-1];
-        GameComponents.counters[goID->index] = GameComponents.counters[NumGameObjects-1];
-        GameComponents.moving_platform[goID->index] = GameComponents.moving_platform[NumGameObjects-1];
-        GameComponents.sprite[goID->index] = GameComponents.sprite[NumGameObjects-1];
-        
-        //if we swapped, update the index into the component lists
-        GameObjectIDs[idIndex].index = goID->index;
-    }
-    
-    //the list of object components gets packed down
-    NumGameObjects--;
-    
-    goID->inUse = false;
+	GameObjects[id].inUse = false;
+	if (id == NumGameObjects-1)
+		NumGameObjects--;
 }
 
 
-#define GO(component) (&GameComponents.component[GameObjectIDs[goId].index])
-#define OTH(id, component) (&GameComponents.component[GameObjectIDs[id].index])
-
+#define GO(component) (&GameObjects[goId].component)
+#define OTH(id, component) (&GameObjects[id].component)
 
 void InitObject(int goId)
 {
     auto meta = GO(metadata);
+    if (meta->cmpInUse & DRAW_EDITOR_GUI)
+    {
+        auto member = GO(draw_editor_gui);
+        member->draw = NULL;
+    }
+    if (meta->cmpInUse & DRAW_GAME_GUI)
+    {
+        auto member = GO(draw_game_gui);
+        member->draw = NULL;
+    }
+    if (meta->cmpInUse & PARENT)
+    {
+        auto member = GO(parent);
+        member->parentID = -1;
+        member->offset = vec2(0,0);
+    }
+    if (meta->cmpInUse & PHYSICS)
+    {
+        auto member = GO(physics);
+    }
+    if (meta->cmpInUse & RIDES_PLATFORMS)
+    {
+        auto member = GO(rides_platforms);
+        member->platformID = -1;
+    }
+    if (meta->cmpInUse & SAVE_AND_LOAD)
+    {
+        auto member = GO(save_and_load);
+        member->in_out = NULL;
+    }
+    if (meta->cmpInUse & STRING_STORAGE)
+    {
+        auto member = GO(string_storage);
+        member->string = NULL;
+    }
+    if (meta->cmpInUse & TRANSFORM)
+    {
+        auto member = GO(transform);
+        member->oldY = 0;
+        member->rot = 0.0f;
+        member->scale = vec2(1.000000f,1.000000f);
+    }
+    if (meta->cmpInUse & UPDATE)
+    {
+        auto member = GO(update);
+        member->update = NULL;
+    }
+    if (meta->cmpInUse & WAYPOINTS)
+    {
+        auto member = GO(waypoints);
+        member->count = 0;
+    }
     if (meta->cmpInUse & ANIM)
     {
         auto member = GO(anim);
@@ -310,42 +364,11 @@ void InitObject(int goId)
         auto member = GO(custom_flags);
         member->bits = 0;
     }
-    if (meta->cmpInUse & DRAW_EDITOR_GUI)
-    {
-        auto member = GO(draw_editor_gui);
-        member->draw = NULL;
-    }
-    if (meta->cmpInUse & DRAW_GAME_GUI)
-    {
-        auto member = GO(draw_game_gui);
-        member->draw = NULL;
-    }
-    if (meta->cmpInUse & PHYSICS)
-    {
-        auto member = GO(physics);
-    }
-    if (meta->cmpInUse & RIDES_PLATFORMS)
-    {
-        auto member = GO(rides_platforms);
-        member->platformID = -1;
-    }
-    if (meta->cmpInUse & TRANSFORM)
-    {
-        auto member = GO(transform);
-        member->oldY = 0;
-        member->rot = 0.0f;
-        member->scale = vec2(1.000000f,1.000000f);
-    }
-    if (meta->cmpInUse & UPDATE)
-    {
-        auto member = GO(update);
-        member->update = NULL;
-    }
     if (meta->cmpInUse & COLLIDER)
     {
         auto member = GO(collider);
-        member->mask = 0;
-        member->category = 0;
+        member->mask = 65535;
+        member->category = 1;
     }
     if (meta->cmpInUse & SPECIAL_DRAW)
     {
@@ -362,6 +385,7 @@ void InitObject(int goId)
     {
         auto member = GO(counters);
         member->counters = 0;
+        member->counters2 = 0;
     }
     if (meta->cmpInUse & MOVING_PLATFORM)
     {
@@ -383,6 +407,14 @@ object_type GetObjectType(char *type)
         return OBJ_DIALOGUE_BOX;
     if (strcmp(type, "OBJ_PLAYER") == 0)
         return OBJ_PLAYER;
+    if (strcmp(type, "OBJ_HEALTH_BAR") == 0)
+        return OBJ_HEALTH_BAR;
+    if (strcmp(type, "OBJ_KNOCKBACK") == 0)
+        return OBJ_KNOCKBACK;
+    if (strcmp(type, "OBJ_SWORD_SWIPE") == 0)
+        return OBJ_SWORD_SWIPE;
+    if (strcmp(type, "OBJ_DUST") == 0)
+        return OBJ_DUST;
     if (strcmp(type, "OBJ_CRYSTAL_GENERATOR") == 0)
         return OBJ_CRYSTAL_GENERATOR;
     if (strcmp(type, "OBJ_GENERATOR_DISPLAY") == 0)
@@ -403,6 +435,8 @@ object_type GetObjectType(char *type)
         return OBJ_GAME_CAMERA;
     if (strcmp(type, "OBJ_ROCK") == 0)
         return OBJ_ROCK;
+    if (strcmp(type, "OBJ_DOOR") == 0)
+        return OBJ_DOOR;
     if (strcmp(type, "OBJ_RAIN_GENERATOR") == 0)
         return OBJ_RAIN_GENERATOR;
     if (strcmp(type, "OBJ_LEVEL_LOADER") == 0)
@@ -427,28 +461,50 @@ object_type GetObjectType(char *type)
         return OBJ_PREFAB_PLACER;
     if (strcmp(type, "OBJ_LEVEL_SELECTOR") == 0)
         return OBJ_LEVEL_SELECTOR;
+    if (strcmp(type, "OBJ_EDIT_OBJECTS") == 0)
+        return OBJ_EDIT_OBJECTS;
+    if (strcmp(type, "OBJ_DEBUG_FUNCTIONS") == 0)
+        return OBJ_DEBUG_FUNCTIONS;
+    if (strcmp(type, "OBJ_STANDIN") == 0)
+        return OBJ_STANDIN;
+    if (strcmp(type, "OBJ_ENEMY_JUMPER") == 0)
+        return OBJ_ENEMY_JUMPER;
+    if (strcmp(type, "OBJ_ENEMY_PROJECTILE") == 0)
+        return OBJ_ENEMY_PROJECTILE;
+    if (strcmp(type, "OBJ_ENEMY_SWORD_SWIPE") == 0)
+        return OBJ_ENEMY_SWORD_SWIPE;
+    if (strcmp(type, "OBJ_ENEMY_SWOOPER") == 0)
+        return OBJ_ENEMY_SWOOPER;
     return OBJ_NONE;
 }
 
 
 component_type GetComponentType(char *type)
 {
-    if (strcmp(type, "ANIM") == 0)
-        return ANIM;
-    if (strcmp(type, "CUSTOM_FLAGS") == 0)
-        return CUSTOM_FLAGS;
     if (strcmp(type, "DRAW_EDITOR_GUI") == 0)
         return DRAW_EDITOR_GUI;
     if (strcmp(type, "DRAW_GAME_GUI") == 0)
         return DRAW_GAME_GUI;
+    if (strcmp(type, "PARENT") == 0)
+        return PARENT;
     if (strcmp(type, "PHYSICS") == 0)
         return PHYSICS;
     if (strcmp(type, "RIDES_PLATFORMS") == 0)
         return RIDES_PLATFORMS;
+    if (strcmp(type, "SAVE_AND_LOAD") == 0)
+        return SAVE_AND_LOAD;
+    if (strcmp(type, "STRING_STORAGE") == 0)
+        return STRING_STORAGE;
     if (strcmp(type, "TRANSFORM") == 0)
         return TRANSFORM;
     if (strcmp(type, "UPDATE") == 0)
         return UPDATE;
+    if (strcmp(type, "WAYPOINTS") == 0)
+        return WAYPOINTS;
+    if (strcmp(type, "ANIM") == 0)
+        return ANIM;
+    if (strcmp(type, "CUSTOM_FLAGS") == 0)
+        return CUSTOM_FLAGS;
     if (strcmp(type, "COLLIDER") == 0)
         return COLLIDER;
     if (strcmp(type, "SPECIAL_DRAW") == 0)
@@ -488,53 +544,7 @@ int DeserializeObject(json_value *val)
 
 	while (el)
 	{
-		if (strcmp(el->key, "anim") == 0)
-		{
-			auto c = GO(anim);
-			json_hash_element *member = el->value->hash->first;
-			while (member)
-			{
-				if (strcmp(member->key, "name") == 0)
-                {
-                    DeserializeCharStar(member->value, &c->name);
-                }
-				else if (strcmp(member->key, "playing") == 0)
-                {
-                    DeserializeBool(member->value, &c->playing);
-                }
-				else if (strcmp(member->key, "loop") == 0)
-                {
-                    DeserializeBool(member->value, &c->loop);
-                }
-				else if (strcmp(member->key, "speedFactor") == 0)
-                {
-                    DeserializeFloat(member->value, &c->speedFactor);
-                }
-				else if (strcmp(member->key, "frameTime") == 0)
-                {
-                    DeserializeFloat(member->value, &c->frameTime);
-                }
-				else if (strcmp(member->key, "currentFrame") == 0)
-                {
-                    DeserializeInt(member->value, &c->currentFrame);
-                }
-				member = member->next;
-			}
-		}
-		else if (strcmp(el->key, "custom_flags") == 0)
-		{
-			auto c = GO(custom_flags);
-			json_hash_element *member = el->value->hash->first;
-			while (member)
-			{
-				if (strcmp(member->key, "bits") == 0)
-                {
-                    DeserializeUint32(member->value, &c->bits);
-                }
-				member = member->next;
-			}
-		}
-		else if (strcmp(el->key, "draw_editor_gui") == 0)
+		if (strcmp(el->key, "draw_editor_gui") == 0)
 		{
 			auto c = GO(draw_editor_gui);
 			json_hash_element *member = el->value->hash->first;
@@ -556,6 +566,23 @@ int DeserializeObject(json_value *val)
 				if (strcmp(member->key, "draw") == 0)
                 {
                     c->draw = GetFunction(member->value->string);
+                }
+				member = member->next;
+			}
+		}
+		else if (strcmp(el->key, "parent") == 0)
+		{
+			auto c = GO(parent);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "parentID") == 0)
+                {
+                    DeserializeInt(member->value, &c->parentID);
+                }
+				else if (strcmp(member->key, "offset") == 0)
+                {
+                    DeserializeIvec2(member->value, &c->offset);
                 }
 				member = member->next;
 			}
@@ -604,6 +631,32 @@ int DeserializeObject(json_value *val)
 				member = member->next;
 			}
 		}
+		else if (strcmp(el->key, "save_and_load") == 0)
+		{
+			auto c = GO(save_and_load);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "in_out") == 0)
+                {
+                    c->in_out = GetFunction(member->value->string);
+                }
+				member = member->next;
+			}
+		}
+		else if (strcmp(el->key, "string_storage") == 0)
+		{
+			auto c = GO(string_storage);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "string") == 0)
+                {
+                    DeserializeCharStar(member->value, &c->string);
+                }
+				member = member->next;
+			}
+		}
 		else if (strcmp(el->key, "transform") == 0)
 		{
 			auto c = GO(transform);
@@ -638,6 +691,68 @@ int DeserializeObject(json_value *val)
 				if (strcmp(member->key, "update") == 0)
                 {
                     c->update = GetFunction(member->value->string);
+                }
+				member = member->next;
+			}
+		}
+		else if (strcmp(el->key, "waypoints") == 0)
+		{
+			auto c = GO(waypoints);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "count") == 0)
+                {
+                    DeserializeInt(member->value, &c->count);
+                }
+				else if (strcmp(member->key, "points") == 0)
+                {
+                }
+				member = member->next;
+			}
+		}
+		else if (strcmp(el->key, "anim") == 0)
+		{
+			auto c = GO(anim);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "name") == 0)
+                {
+                    DeserializeCharStar(member->value, &c->name);
+                }
+				else if (strcmp(member->key, "playing") == 0)
+                {
+                    DeserializeBool(member->value, &c->playing);
+                }
+				else if (strcmp(member->key, "loop") == 0)
+                {
+                    DeserializeBool(member->value, &c->loop);
+                }
+				else if (strcmp(member->key, "speedFactor") == 0)
+                {
+                    DeserializeFloat(member->value, &c->speedFactor);
+                }
+				else if (strcmp(member->key, "frameTime") == 0)
+                {
+                    DeserializeFloat(member->value, &c->frameTime);
+                }
+				else if (strcmp(member->key, "currentFrame") == 0)
+                {
+                    DeserializeInt(member->value, &c->currentFrame);
+                }
+				member = member->next;
+			}
+		}
+		else if (strcmp(el->key, "custom_flags") == 0)
+		{
+			auto c = GO(custom_flags);
+			json_hash_element *member = el->value->hash->first;
+			while (member)
+			{
+				if (strcmp(member->key, "bits") == 0)
+                {
+                    DeserializeUint32(member->value, &c->bits);
                 }
 				member = member->next;
 			}
@@ -708,6 +823,10 @@ int DeserializeObject(json_value *val)
 				if (strcmp(member->key, "counters") == 0)
                 {
                     DeserializeUint32(member->value, &c->counters);
+                }
+				else if (strcmp(member->key, "counters2") == 0)
+                {
+                    DeserializeUint32(member->value, &c->counters2);
                 }
 				member = member->next;
 			}

@@ -12,6 +12,10 @@ OPTIMIZATION="-Os"
 
 fi
 
-../build/preprocessor
+#../build/preprocessor
+
+clang++ -g -O0 -std=c++11 /Users/danielmoore/Github/EMPGame/src/datapacker.cpp -o /Users/danielmoore/Github/EMPGame/build/datapacker
+
+../build/datapacker NO_OUTPUT
 
 clang++ -g -glldb $OPTIMIZATION -Wno-shift-negative-value -Wno-format-security -Wno-format -Wno-writable-strings -std=c++11 $HEADER_SEARCH_PATHS /Users/danielmoore/Github/EMPGame/src/main.cpp -o /Users/danielmoore/Github/EMPGame/build/game -framework CoreServices -framework OpenGL -framework OpenAL -lSDL2 -logg -lvorbis -lvorbisenc -lvorbisfile

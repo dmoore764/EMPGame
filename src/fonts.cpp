@@ -1,16 +1,9 @@
-void InitFont(font *f, const char *name, const char *directory, const char *file)
+void InitFont(font *f, const char *name, void *fileData, size_t fontLength)
 {
 	strcpy(f->name, name);
-	sprintf(f->filename, "%s%s", directory, file);
-	f->font_file_data = (uint8_t *)ReadBinaryFile(f->filename, &f->font_file_length);
-	if (!f->font_file_data)
-	{
-		ERR("Could not find font file '%s'", f->filename);
-	}
-	else
-	{
-		stbtt_InitFont(&f->info, f->font_file_data, stbtt_GetFontOffsetForIndex(f->font_file_data,0));
-	}
+	f->font_file_data = (uint8_t *)fileData;
+	f->font_file_length = fontLength;
+	stbtt_InitFont(&f->info, f->font_file_data, stbtt_GetFontOffsetForIndex(f->font_file_data,0));
 	InitHash(&f->sizes, 16);
 }
 

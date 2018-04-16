@@ -19,17 +19,21 @@ void CollisionUpdate(int goId)
 		if (GameComponents.idIndex[i] != goId && (meta->cmpInUse & COLLIDER) && (meta->cmpInUse & TRANSFORM))
 		{
 			auto othCollider = &GameComponents.collider[i];
-			auto othTx = &GameComponents.transform[i];
-			int othMinX = othTx->pos.x + othCollider->bl.x;
-			int othMinY = othTx->pos.y + othCollider->bl.y;
-			int othMaxX = othTx->pos.x + othCollider->ur.x;
-			int othMaxY = othTx->pos.y + othCollider->ur.y;
 			
-			if (minX <= othMaxX && maxX >= othMinX && minY <= othMaxY && maxY >= othMinY)
+			if ((collider->mask & othCollider->category) && (collider->category & othCollider->mask))
 			{
-				collider->collisions[collisionCount++] = GameComponents.idIndex[i];
-				if (collisionCount == 4)
-					return;
+				auto othTx = &GameComponents.transform[i];
+				int othMinX = othTx->pos.x + othCollider->bl.x;
+				int othMinY = othTx->pos.y + othCollider->bl.y;
+				int othMaxX = othTx->pos.x + othCollider->ur.x;
+				int othMaxY = othTx->pos.y + othCollider->ur.y;
+
+				if (minX <= othMaxX && maxX >= othMinX && minY <= othMaxY && maxY >= othMinY)
+				{
+					collider->collisions[collisionCount++] = GameComponents.idIndex[i];
+					if (collisionCount == 4)
+						return;
+				}
 			}
 		}
 	}

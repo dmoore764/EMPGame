@@ -1,0 +1,20 @@
+{
+	type : OBJ_ENEMY_SWOOPER,
+	components : [ UPDATE, CUSTOM_FLAGS, PHYSICS, TRANSFORM, SPRITE, COLLIDER, WAYPOINTS, SAVE_AND_LOAD ],
+	data : {
+		update : {
+			update : "SwooperUpdate"
+		},
+		sprite : {
+			name : "Swooper1",
+			depth: 4,
+		},
+		collider : {
+			ur : [3072, 4608],
+			bl : [-3072, 0],
+		},
+		save_and_load : {
+			in_out : "SwooperSaveAndLoad"
+		},
+	}
+}

@@ -1,6 +1,19 @@
 global_variable char DebugMessage[128];
 global_variable int DebugMessageCounter;
 
+enum save_and_load_options
+{
+	SAVE,
+	LOAD,
+};
+global_variable save_and_load_options SaveOrLoad;
+global_variable json_value *LoadData;
+global_variable char *SaveData;
+
+global_variable bool LevelLoaderInitialized;
+global_variable int OnLevel = 0;
+global_variable int LoadedLevel = 0;
+
 inline v2 ToScreen(ivec2 p)
 {
 	v2 result = {(float)(p.x - Camera.pos.x), (float)(p.y - Camera.pos.y)};
@@ -31,11 +44,12 @@ inline void ClearCounter(uint32_t *counter, int byteNum)
 	*counter &= clearMask;
 }
 
-inline void SetCounter(uint32_t *counter, int byteNum, uint8_t val)
+inline uint8_t SetCounter(uint32_t *counter, int byteNum, uint8_t val)
 {
 	ClearCounter(counter, byteNum);
 	uint32_t v = (uint32_t)val << (byteNum << 3);
 	*counter |= v;
+	return *counter;
 }
 
 inline uint8_t IncrementCounter(uint32_t *counter, int byteNum)
@@ -120,8 +134,10 @@ struct irect
 	ivec2 BL;
 	ivec2 UR;
 };
+
 global_variable irect CameraRestraintAreas[20];
 global_variable int NumCameraRestraintAreas;
+global_variable ivec2 InitialCameraPos;
 
 GET_CAMERA_FOCUS(PlayerFocus)
 {
@@ -215,14 +231,26 @@ enum player_flags
 	SKIDDING		= 0x40, //sliding on flat ground
 	SLIDE_LEFT		= 0x80,
 	ON_LADDER		= 0x100,
+	ON_WALL			= 0x200,
+	USED_WALL_JUMP	= 0x400,
+	WALL_ON_LEFT	= 0x800,
+	WALL_ON_RIGHT	= 0x1000,
+	WALL_JUMPING	= 0x2000,
 };
 
 enum player_counters
 {
 	PLYR_SINCE_LEFT_GROUND		= 0,
-	//PLYR_JUMP_HEIGHT			= 1,
+	PLYR_WALL_TIME				= 1,
 	PLYR_ITEM_CARRIED			= 2,
 	PLYR_TIME_SINCE_JUMP		= 3,
+};
+
+enum player_counters2
+{
+	PLYR_CREATE_DUST			= 0,
+	PLYR_INVICIBLE				= 1,
+	PLYR_KNOCKBACK				= 2,
 };
 
 inline void DrawPoint(uint32_t color, uint32_t x, uint32_t y)
@@ -1321,9 +1349,10 @@ struct test_point
 	point_type type;
 	int32_t limit;
 	vec2 normal;
+	int platformID;
 };
 
-void PlatformTest(test_point *points, int numPoints)
+void PlatformTest(int goId, test_point *points, int numPoints)
 {
 	uint32_t minX = INT_MAX;
 	uint32_t minY = INT_MAX;
@@ -1354,6 +1383,9 @@ void PlatformTest(test_point *points, int numPoints)
 
 	for (int j = 0; j < NumGameObjects; j++)
 	{
+		if (GameComponents.idIndex[j] == goId)
+			continue;
+
 		auto meta = &GameComponents.metadata[j];
 		if ((meta->cmpInUse & MOVING_PLATFORM) && (meta->cmpInUse & TRANSFORM))
 		{
@@ -1382,8 +1414,9 @@ void PlatformTest(test_point *points, int numPoints)
 						{ 
 							if (points[i].limit > (platformTx->pos.y + platform->bl.y))
 							{
-							   points[i].limit = platformTx->pos.y + platform->bl.y;
-							   points[i].normal = {0,-1};
+								points[i].limit = platformTx->pos.y + platform->bl.y;
+								points[i].normal = {0,-1};
+								points[i].platformID = GameComponents.idIndex[j];
 							}
 						} break;
 						case POINT_BOTTOM: 
@@ -1392,6 +1425,7 @@ void PlatformTest(test_point *points, int numPoints)
 							{
 								points[i].limit = (platformTx->pos.y + platform->ur.y); 
 								points[i].normal = {0,1};
+								points[i].platformID = GameComponents.idIndex[j];
 							}
 						} break;
 						case POINT_RIGHT: 
@@ -1400,6 +1434,7 @@ void PlatformTest(test_point *points, int numPoints)
 							{
 								points[i].limit = platformTx->pos.x + platform->bl.x;
 								points[i].normal = {-1,0};
+								points[i].platformID = GameComponents.idIndex[j];
 							}
 						} break;
 						case POINT_LEFT: 
@@ -1408,6 +1443,7 @@ void PlatformTest(test_point *points, int numPoints)
 							{
 								points[i].limit = platformTx->pos.x + platform->ur.x;
 								points[i].normal = {1,0};
+								points[i].platformID = GameComponents.idIndex[j];
 							}
 						} break;
 					}
@@ -2321,7 +2357,618 @@ void CreateUpgradePanel()
 */
 
 
+struct tile_collision_info
+{
+	int maxFallSpeed = -0x600;
+	int headHalfWidth = 3072; // 6 << 9
+	int headHeight = 6144; // 12 << 9
+	int bodyHalfWidth = 4096; // 8 << 9
 
+	int gravity = -36;
+	int maxVelocity = 0x400;
+
+	int horizontalDamping = 20;
+	int airborneHorizontalDamping = 6;
+
+	bool setXScale = true;
+};
+
+void EnemyTileCollisions(int goId, tile_collision_info *info)
+{
+	auto phys = GO(physics);
+	auto tx = GO(transform);
+	auto flag = GO(custom_flags);
+	auto rider = GO(rides_platforms);
+	
+	phys->vel.y = Max(info->maxFallSpeed, phys->vel.y);
+
+	bool wasOnGround = flag->bits & ON_GROUND;
+	flag->bits &= ~ON_GROUND;
+
+	test_point TestPoints[11] = {};
+	TestPoints[0].p = {tx->pos.x, tx->pos.y - (1 << 9)};
+	TestPoints[0].type = POINT_BOTTOM;
+	TestPoints[1].p = {tx->pos.x - (3 << 9), tx->pos.y - (1 << 9)};
+	TestPoints[1].type = POINT_BOTTOM;
+	TestPoints[2].p = {tx->pos.x + (3 << 9), tx->pos.y - (1 << 9)};
+	TestPoints[2].type = POINT_BOTTOM;
+
+	PlatformTest(goId, TestPoints + 0, 3);
+
+	uint8_t centerFootT = TileAtPoint(TestPoints[0].p, tx->oldY);
+	uint8_t leftFootT = TileAtPoint(TestPoints[1].p, tx->oldY);
+	uint8_t rightFootT = TileAtPoint(TestPoints[2].p, tx->oldY);
+
+	tx->oldY = tx->pos.y;
+
+	int32_t tileH = INT_MIN;
+	bool onPlatform = false;
+	bool testSlope = false;
+	bool onSquareTile = false;
+
+	bool lastFrameOnSlope = flag->bits & ON_SLOPE;
+	flag->bits &= ~ON_SLOPE;
+
+	if (centerFootT >= SMALL_SLOPE_LEFT1 && centerFootT <= LARGE_SLOPE_RIGHT)
+	{
+		testSlope = true;
+		int32_t tileX = (tx->pos.x >> 12) << 12;
+		int32_t tileY = ((tx->pos.y - 0x200) >> 12) << 12;
+		tileH = GetGroundYForTileAndPos(tileX, tileY, centerFootT, tx->pos.x);
+	}
+	else if (centerFootT == SQUARE || (!lastFrameOnSlope && (leftFootT == SQUARE || rightFootT == SQUARE)))
+	{
+		onSquareTile = true;
+		int tileY = (tx->pos.y - 0x200) >> 12;
+		tileH = (tileY + 1) << 12;
+	}
+
+	int32_t platformH = INT_MIN;
+	if (TestPoints[0].hitting && TestPoints[0].limit > tileH)
+	{
+		onPlatform = true;
+		platformH = TestPoints[0].limit;
+	}
+	if (TestPoints[1].hitting && TestPoints[1].limit > tileH && TestPoints[1].limit > platformH)
+	{
+		onPlatform = true;
+		platformH = TestPoints[1].limit;
+	}
+	if (TestPoints[2].hitting && TestPoints[2].limit > tileH && TestPoints[2].limit > platformH)
+	{
+		onPlatform = true;
+		platformH = TestPoints[2].limit;
+	}
+
+	bool continuousSlope = false;
+	if (onPlatform)
+	{
+		phys->vel.y = 0;
+		tx->pos.y = platformH;
+		flag->bits |= ON_GROUND;
+	}
+	else if (testSlope)
+	{
+		//if going from being on ground to being over a slope that is continuous with the ground, we will snap down to the slope
+		continuousSlope = centerFootT == LARGE_SLOPE_RIGHT || centerFootT == LARGE_SLOPE_LEFT || centerFootT == SMALL_SLOPE_LEFT2 || centerFootT == SMALL_SLOPE_RIGHT2;
+		if (!(flag->bits & HOLDING_JUMP) && ((phys->vel.y <= 0 && tx->pos.y <= tileH) || lastFrameOnSlope || (wasOnGround && continuousSlope)))
+		{
+			flag->bits |= ON_SLOPE;
+			if (centerFootT == LARGE_SLOPE_LEFT || centerFootT == SMALL_SLOPE_LEFT2 || centerFootT == SMALL_SLOPE_LEFT1)
+				flag->bits |= LEFT_SLOPE;
+			else
+				flag->bits &= ~LEFT_SLOPE;
+			phys->vel.y = 0;
+			tx->pos.y = tileH;
+			flag->bits |= ON_GROUND;
+		}
+	}
+	else if (onSquareTile)
+	{
+		phys->vel.y = 0;
+		tx->pos.y = tileH;
+		flag->bits |= ON_GROUND;
+	}
+
+
+
+	TestPoints[9].p = {tx->pos.x - info->headHalfWidth, tx->pos.y + info->headHeight};
+	TestPoints[9].type = POINT_TOP;
+	TestPoints[10].p = {tx->pos.x + info->headHalfWidth, tx->pos.y + info->headHeight};
+	TestPoints[10].type = POINT_TOP;
+
+	PlatformTest(goId, TestPoints + 9, 2);
+
+
+	bool colHead = false;
+	int colPointHead = INT_MAX;
+
+	if (TileAtPoint(TestPoints[9].p) == SQUARE || TileAtPoint(TestPoints[10].p) == SQUARE)
+	{
+		colHead = true;
+		int tileYatHead = (((tx->pos.y + info->headHeight) >> 12) << 12);
+		colPointHead = tileYatHead - info->headHeight - (1 << 9);
+	}
+
+	if (TestPoints[9].hitting)
+	{
+		colHead = true;
+		colPointHead = Min(TestPoints[9].limit - info->headHeight - (1 << 9), colPointHead);
+	}
+	if (TestPoints[10].hitting)
+	{
+		colHead = true;
+		colPointHead = Min(TestPoints[10].limit - info->headHeight - (1 << 9), colPointHead);
+	}
+
+	if (phys->vel.y > 0)
+	{
+		if (colHead)
+		{
+			tx->pos.y = colPointHead;
+			phys->vel.y = 0;
+		}
+	}
+
+	int foot1 = 3;
+	int foot2 = (((info->headHeight >> 9) - 3) / 2) + 3;
+	int foot3 = info->headHeight >> 9;
+
+	TestPoints[3].p = {tx->pos.x - info->bodyHalfWidth, tx->pos.y + (foot1 << 9)};
+	TestPoints[3].type = POINT_LEFT;
+	TestPoints[4].p = {tx->pos.x - info->bodyHalfWidth, tx->pos.y + (foot2 << 9)};
+	TestPoints[4].type = POINT_LEFT;
+	TestPoints[5].p = {tx->pos.x - info->bodyHalfWidth, tx->pos.y + (foot3 << 9)};
+	TestPoints[5].type = POINT_LEFT;
+	TestPoints[6].p = {tx->pos.x + info->bodyHalfWidth, tx->pos.y + (foot1 << 9)};
+	TestPoints[6].type = POINT_RIGHT;
+	TestPoints[7].p = {tx->pos.x + info->bodyHalfWidth, tx->pos.y + (foot2 << 9)};
+	TestPoints[7].type = POINT_RIGHT;
+	TestPoints[8].p = {tx->pos.x + info->bodyHalfWidth, tx->pos.y + (foot3 << 9)};
+	TestPoints[8].type = POINT_RIGHT;
+
+	PlatformTest(goId, TestPoints + 3, 6);
+
+
+	bool colLeft = false;
+	bool colRight = false;
+	int32_t colPointL = INT_MIN;
+	int32_t colPointR = INT_MAX;
+
+	if (!(flag->bits & ON_LADDER))
+	{
+		if ((!continuousSlope && TileAtPoint(TestPoints[3].p) == SQUARE) || (TileAtPoint(TestPoints[4].p) == SQUARE) || (TileAtPoint(TestPoints[5].p) == SQUARE))
+		{
+			int tileX = (tx->pos.x - info->bodyHalfWidth) >> 12;
+			colPointL = ((tileX + 1) << 12) + info->bodyHalfWidth;
+			colLeft = true;
+		}
+		if ((!continuousSlope && TileAtPoint(TestPoints[6].p) == SQUARE) || (TileAtPoint(TestPoints[7].p) == SQUARE) || (TileAtPoint(TestPoints[8].p) == SQUARE))
+		{
+			int tileX = (tx->pos.x + info->bodyHalfWidth) >> 12;
+			colPointR = ((tileX) << 12) - info->bodyHalfWidth;
+			colRight = true;
+		}
+	}
+
+	if (TestPoints[3].hitting)
+	{
+		colLeft = true;
+		colPointL = Max(TestPoints[3].limit + info->bodyHalfWidth, colPointL);
+	}
+	if (TestPoints[4].hitting)
+	{
+		colLeft = true;
+		colPointL = Max(TestPoints[4].limit + info->bodyHalfWidth, colPointL);
+	}
+	if (TestPoints[5].hitting)
+	{
+		colLeft = true;
+		colPointL = Max(TestPoints[5].limit + info->bodyHalfWidth, colPointL);
+	}
+
+	if (TestPoints[6].hitting)
+	{
+		colRight = true;
+		colPointR = Min(TestPoints[6].limit - info->bodyHalfWidth, colPointR);
+	}
+	if (TestPoints[7].hitting)
+	{
+		colRight = true;
+		colPointR = Min(TestPoints[7].limit - info->bodyHalfWidth, colPointR);
+	}
+	if (TestPoints[8].hitting)
+	{
+		colRight = true;
+		colPointR = Min(TestPoints[8].limit - info->bodyHalfWidth, colPointR);
+	}
+
+	if (colLeft)
+	{
+		if (phys->vel.x <= 0)
+			phys->vel.x = 0;
+		tx->pos.x = colPointL;
+	}
+
+	if (colRight)
+	{
+		if (phys->vel.x >= 0)
+			phys->vel.x = 0;
+		tx->pos.x = colPointR;
+	}
+
+	//Check if standing on slope
+	uint8_t footT = TileAtPoint({tx->pos.x, tx->pos.y});
+	if (footT >= SMALL_SLOPE_LEFT1 && footT <= LARGE_SLOPE_RIGHT)
+	{
+		int32_t tileX = (tx->pos.x >> 12) << 12;
+		int32_t tileY = ((tx->pos.y) >> 12) << 12;
+		int32_t groundY = GetGroundYForTileAndPos(tileX, tileY, footT, tx->pos.x);
+		if (phys->vel.y <= 0 && tx->pos.y <= groundY)
+		{
+			flag->bits |= ON_SLOPE;
+			if (footT == LARGE_SLOPE_LEFT || footT == SMALL_SLOPE_LEFT2 || footT == SMALL_SLOPE_LEFT1)
+				flag->bits |= LEFT_SLOPE;
+			else
+				flag->bits &= ~LEFT_SLOPE;
+			phys->vel.y = 0;
+			tx->pos.y = groundY;
+			flag->bits |= ON_GROUND;
+		}
+	}
+
+	if (flag->bits & ON_GROUND)
+	{
+		phys->accel.y = 0;
+	}
+	else
+	{
+		phys->accel.y = info->gravity;
+	}
+
+	int horzImpSign = Sign(phys->accel.x);
+	int maxVelocity = info->maxVelocity;
+
+	int horizontalDamping = info->horizontalDamping;
+	if (!(flag->bits & ON_GROUND))
+	{
+		horizontalDamping = info->airborneHorizontalDamping;
+	}
+
+	float newXScale = tx->scale.x;
+
+	if (phys->vel.x > 0)
+	{
+		if (flag->bits & ON_GROUND)
+		{
+			newXScale = 1;
+			if (phys->vel.x > maxVelocity)
+				phys->vel.x = maxVelocity;
+		}
+		else
+		{
+			float scaleX = Sign(phys->accel.x); 
+			if (scaleX != 0)
+				newXScale = scaleX;
+		}
+		if (phys->vel.x > horizontalDamping)
+			phys->vel.x -= horizontalDamping;
+		else
+			phys->vel.x = 0;
+	}
+	else if (phys->vel.x < 0)
+	{
+		if (flag->bits & ON_GROUND)
+		{
+			newXScale = -1;
+			if (phys->vel.x < -maxVelocity)
+				phys->vel.x = -maxVelocity;
+		}
+		else
+		{
+			float scaleX = Sign(phys->accel.x); 
+			if (scaleX != 0)
+				newXScale = scaleX;
+		}
+		if (phys->vel.x < -horizontalDamping)
+			phys->vel.x += horizontalDamping;
+		else
+			phys->vel.x = 0;
+	}
+	else
+	{
+		if (horzImpSign)
+			newXScale = horzImpSign;
+	}
+
+	if (info->setXScale)
+		tx->scale.x = newXScale;
+
+	rider->size.y = (foot3 << 9);
+
+}
+
+
+enum health_bar_counters
+{
+	HEALTH_BAR_PLAYER_HEALTH	= 0,
+};
+
+UPDATE_FUNCTION(HealthBarDraw)
+{
+	auto counters = GO(counters);
+	SetShader("basic");
+	float t = App.gameWindowSize.y << 1;
+	float b = t - 16;
+	float l = 0;
+	float r = App.gameWindowSize.x << 1;
+	DrawQuad(MAKE_COLOR(0,0,0,255), {l, t}, {r, t}, {r, b}, {l, b});
+	SetShader("basic_tex_color");
+	SetFont("PixelOperator", 15);
+	SetFontColor(MAKE_COLOR(255,100,0,255));
+	DrawText(2, b + 3, "Health");
+
+	uint8_t health = GetCounter(counters->counters, HEALTH_BAR_PLAYER_HEALTH);
+	for (int i = 0; i < health; i++)
+		DrawSprite("HeartFull", COL_WHITE, {l + 50 + i*12, b + 2}, 0, {1,1});
+	for (int i = health; i < 5; i++)
+		DrawSprite("HeartEmpty", COL_WHITE, {l + 50 + i*12, b + 2}, 0, {1,1});
+}
+
+int CreateHealthBar()
+{
+	int goId = AddObject(OBJ_HEALTH_BAR);
+	auto meta = GO(metadata);
+	auto drawgui = GO(draw_game_gui);
+	meta->cmpInUse = COUNTERS | DRAW_GAME_GUI;
+	meta->flags = GAME_OBJECT;
+	InitObject(goId);
+	drawgui->draw = HealthBarDraw;
+	return goId;
+}
+
+
+enum game_freeze_counters
+{
+	GAME_FREEZE_NUM_FRAMES		= 0,
+	GAME_FREEZE_CUR_FRAME		= 1,
+	GAME_FREEZE_DELAY			= 2,
+};
+
+UPDATE_FUNCTION(GameFreezeUpdate)
+{
+	auto counters = GO(counters);
+	if (DecrementCounter(&counters->counters, GAME_FREEZE_DELAY) == 0)
+	{
+		SendingGameUpdateEvents = false;
+		if (IncrementCounter(&counters->counters, GAME_FREEZE_CUR_FRAME) > GetCounter(counters->counters, GAME_FREEZE_NUM_FRAMES))
+		{
+			RemoveObject(goId);
+			SendingGameUpdateEvents = true;
+		}
+	}
+}
+
+void CreateGameFreezer(int delay, int frames)
+{
+	int goId = AddObject(OBJ_SWORD_SWIPE);
+	auto meta = GO(metadata);
+	auto counters = GO(counters);
+	auto update = GO(update);
+	meta->cmpInUse = COUNTERS | UPDATE;
+	InitObject(goId);
+	SetCounter(&counters->counters, GAME_FREEZE_NUM_FRAMES, frames);
+	SetCounter(&counters->counters, GAME_FREEZE_DELAY, delay);
+	update->update = GameFreezeUpdate;
+}
+
+enum sword_flags
+{
+	SWORD_INITIALIZED		= 0x1,
+	SWORD_COLLISION_TESTED	= 0x2,
+
+	SWIPE_UP				= 0x4,
+	SWIPE_DOWN				= 0x8,
+	SWIPE_LEFT				= 0x10,
+	SWIPE_RIGHT				= 0x20,
+};
+
+UPDATE_FUNCTION(SwordSwipeUpdate)
+{
+	auto tx = GO(transform);
+	auto anim = GO(anim);
+	auto parent = GO(parent);
+	auto flag = GO(custom_flags);
+	auto collider = GO(collider);
+	tx->pos = OTH(parent->parentID, transform)->pos;
+
+
+	if (!(flag->bits & SWORD_INITIALIZED) && !(flag->bits & SWORD_COLLISION_TESTED))
+	{
+		flag->bits |= SWORD_INITIALIZED;
+		collider->mask = 0xffff;
+	}
+	else if (!(flag->bits & SWORD_COLLISION_TESTED))
+	{
+		flag->bits |= SWORD_COLLISION_TESTED;
+		collider->mask = 0;
+	}
+
+	if (!anim->playing)
+	{
+		RemoveObject(goId);
+	}
+}
+
+void CreateSwordSwipe(int parentID, ivec2 pos, uint32_t dir)
+{
+	int goId = AddObject(OBJ_SWORD_SWIPE);
+	auto meta = GO(metadata);
+	auto tx = GO(transform);
+	auto anim = GO(anim);
+	auto collider = GO(collider);
+	auto update = GO(update);
+	auto parent = GO(parent);
+	auto flag = GO(custom_flags);
+	meta->cmpInUse = CUSTOM_FLAGS | UPDATE | PARENT | TRANSFORM | COLLIDER | SPRITE | ANIM;
+	meta->flags |= GAME_OBJECT;
+	InitObject(goId);
+	tx->pos = pos;
+	anim->loop = false;
+	anim->playing = true;
+	anim->frameTime = 0;
+	update->update = SwordSwipeUpdate;
+	flag->bits |= dir;
+
+	if (flag->bits & SWIPE_RIGHT)
+	{
+		collider->ur = ivec2((40 << 9), (12 << 9));
+		collider->bl = ivec2(0, -(8 << 9));
+		tx->scale.x = 1;
+		anim->name = "sword_side";
+	}
+	else if (flag->bits & SWIPE_LEFT)
+	{
+		collider->ur = ivec2(0, (12 << 9));
+		collider->bl = ivec2(-(40 << 9), -(8 << 9));
+		tx->scale.x = -1;
+		anim->name = "sword_side";
+	} 
+	else if (flag->bits & SWIPE_UP)
+	{
+		collider->ur = ivec2((10 << 9), (40 << 9));
+		collider->bl = ivec2(-(10 << 9), 0);
+		tx->scale.x = 1;
+		anim->name = "sword_up";
+	} 
+	else if (flag->bits & SWIPE_DOWN)
+	{
+		collider->ur = ivec2((10 << 9), 0);
+		collider->bl = ivec2(-(10 << 9), -(40 << 9));
+		tx->scale.x = 1;
+		anim->name = "sword_down";
+	} 
+
+	collider->mask = 0;
+	parent->parentID = parentID;
+}
+
+UPDATE_FUNCTION(DeleteOnAnimFinishUpdate)
+{
+	auto anim = GO(anim);
+	if (anim->playing == false)
+	{
+		RemoveObject(goId);
+	}
+}
+
+enum particle_type
+{
+	DUST_SYMMETRICAL_PUFF,
+	DUST_SINGLE_SIDED_PUFF,
+	DUST_RUNNING_PUFF,
+	BLOOD_SPLATTER_SIDE,
+	BLOOD_SPLATTER_UP,
+};
+
+void CreateAnimatedParticles(ivec2 pos, particle_type type, bool puffRight, float rotation)
+{
+	int goId = AddObject(OBJ_DUST);
+	auto meta = GO(metadata);
+	auto tx = GO(transform);
+	auto anim = GO(anim);
+	auto update = GO(update);
+	auto sprite = GO(sprite);
+	meta->cmpInUse = UPDATE | TRANSFORM | SPRITE | ANIM;
+	meta->flags |= GAME_OBJECT;
+	InitObject(goId);
+	tx->pos = pos;
+	if (!puffRight)
+		tx->scale.x = -1;
+	tx->rot = rotation;
+
+	switch (type)
+	{
+		case DUST_SYMMETRICAL_PUFF:
+		{
+			anim->name = "landing_dust";
+		} break;
+		case DUST_SINGLE_SIDED_PUFF:
+		{
+			anim->name = "landing_dust_one_side";
+		} break;
+		case DUST_RUNNING_PUFF:
+		{
+			anim->name = "running_dust";
+			float scale = (rand() % 5) / 10.0f + 0.5f;
+			tx->scale = scale * tx->scale;
+		} break;
+		case BLOOD_SPLATTER_SIDE:
+		{
+			anim->name = "blood_splatter_side";
+		} break;
+		case BLOOD_SPLATTER_UP:
+		{
+			anim->name = "blood_splatter_up";
+		} break;
+	}
+
+	anim->loop = false;
+	anim->playing = true;
+	anim->frameTime = 0;
+	sprite->depth = 8;
+	update->update = DeleteOnAnimFinishUpdate;
+}
+
+
+UPDATE_FUNCTION(KnockBackUpdate)
+{
+	auto counters = GO(counters);
+	//stick around for a frame
+	if (IncrementCounter(&counters->counters, 0) > 1)
+		RemoveObject(goId);
+}
+
+void CreateKnockBack(ivec2 pos, ivec2 amount)
+{
+	int goId = AddObject(OBJ_KNOCKBACK);
+	auto meta = GO(metadata);
+	auto tx = GO(transform);
+	auto phys = GO(physics);
+	auto update = GO(update);
+	auto collider = GO(collider);
+	meta->cmpInUse = UPDATE | PHYSICS | TRANSFORM | COLLIDER;
+	meta->flags |= GAME_OBJECT;
+	InitObject(goId);
+	tx->pos = pos;
+	phys->vel = amount;
+	update->update = KnockBackUpdate;
+	collider->ur = ivec2(5<<9,5<<9);
+	collider->bl = ivec2(-(5<<9),0);
+}
+
+int GetLevelIDFromLevelName(char *levelName)
+{
+	int result = -1;
+	int curLevel = 0;
+
+	void *value;
+	size_t iter = HashGetFirst(&Levels, NULL, NULL, &value);
+	while (value)
+	{
+		json_data_file *file = (json_data_file *)value;
+		if (strcmp(levelName, file->fileName) == 0)
+		{
+			result = curLevel;
+			break;
+		}
+		curLevel++;
+		HashGetNext(&Levels, NULL, NULL, &value, iter);
+	}
+	HashEndIteration(iter); 
+
+	return result;
+}
 
 UPDATE_FUNCTION(PlayerUpdate)
 {
@@ -2333,26 +2980,74 @@ UPDATE_FUNCTION(PlayerUpdate)
 	auto collider = GO(collider);
 	auto rider = GO(rides_platforms);
 
+	int healthBarID = GetFirstOfType(OBJ_HEALTH_BAR);
+	if (healthBarID == -1)
+	{
+		healthBarID = CreateHealthBar();
+		SetCounter(&(OTH(healthBarID, counters)->counters), HEALTH_BAR_PLAYER_HEALTH, 5);
+	}
+
+	bool knockBack = DecrementCounter(&counters->counters2, PLYR_KNOCKBACK) > 0;
+
+
+	if (KeyboardPresses[KB_K])
+	{
+		CreateKnockBack(tx->pos, ivec2(0x500,0));
+	}
+
+
 	bool hasControl = !(flag->bits & CONTROL_LOCKED);
 
 	bool keyUpPressed = hasControl && KeyPresses[KEY_Up];
 	bool keyDownPressed = hasControl && KeyPresses[KEY_Down];
-	bool keyLeftPressed = hasControl && KeyPresses[KEY_Left];
-	bool keyRightPressed = hasControl && KeyPresses[KEY_Right];
+	bool keyLeftPressed = hasControl && !knockBack && KeyPresses[KEY_Left];
+	bool keyRightPressed = hasControl && !knockBack && KeyPresses[KEY_Right];
 	bool keyAction1Pressed = hasControl && KeyPresses[KEY_Action1];
 	bool keyAction2Pressed = hasControl && KeyPresses[KEY_Action2];
 
 	bool keyUpDown = hasControl && KeyDown[KEY_Up];
 	bool keyDownDown = hasControl && KeyDown[KEY_Down];
-	bool keyLeftDown = hasControl && KeyDown[KEY_Left];
-	bool keyRightDown = hasControl && KeyDown[KEY_Right];
+	bool keyLeftDown = hasControl && !knockBack && KeyDown[KEY_Left];
+	bool keyRightDown = hasControl && !knockBack && KeyDown[KEY_Right];
 	bool keyAction1Down = hasControl && KeyDown[KEY_Action1];
 	bool keyAction2Down = hasControl && KeyDown[KEY_Action2];
+
+
+	if (keyAction2Pressed && !(flag->bits & ON_LADDER))
+	{
+		if (keyDownDown && !(flag->bits & ON_GROUND))
+			CreateSwordSwipe(goId, tx->pos, SWIPE_DOWN);
+		else if (keyUpDown)
+			CreateSwordSwipe(goId, tx->pos, SWIPE_UP);
+		else if (keyLeftDown)
+			CreateSwordSwipe(goId, tx->pos + ivec2(0, 6 << 9), SWIPE_LEFT);
+		else if (keyRightDown)
+			CreateSwordSwipe(goId, tx->pos + ivec2(0, 6 << 9), SWIPE_RIGHT);
+		else
+			CreateSwordSwipe(goId, tx->pos + ivec2(0, 6 << 9), Sign(tx->scale.x) > 0 ? SWIPE_RIGHT : SWIPE_LEFT);
+	}
 
 	if (hasControl && KeyboardPresses[KB_D])
 	{
 		CreateDialog({200<<9,100<<9}, tx->pos, "Show some motha fuckin dialog"); 
 	}
+
+	local_persistent int oldCameraW;
+	local_persistent int oldCameraH;
+	local_persistent bool resetAfterHit = false;
+	local_persistent char *animName;
+
+	if (resetAfterHit)
+	{
+		resetAfterHit = false;
+		Camera.width = oldCameraW;
+		Camera.height = oldCameraH;
+		anim->name = animName;
+	}
+
+	//
+	if (GetCounter(counters->counters2, PLYR_INVICIBLE) > 0 && DecrementCounter(&counters->counters2, PLYR_INVICIBLE) == 0)
+		collider->mask = 0xffff;
 
 	for (int i = 0; i < ArrayCount(collider->collisions); i++)
 	{
@@ -2362,6 +3057,55 @@ UPDATE_FUNCTION(PlayerUpdate)
 			object_type type = GameComponents.type[GameObjectIDs[othID].index];
 			switch (type)
 			{
+				case OBJ_DOOR:
+				{
+					if (keyUpDown)
+					{
+						auto str = OTH(othID, string_storage);
+						if (str->string)
+						{
+							char levelName[64];
+							strsplitindex(str->string, '#', 0, levelName);
+
+							int levelID = GetLevelIDFromLevelName(levelName);
+							if (levelID > -1)
+							{
+								OnLevel = levelID;
+								LevelLoaderInitialized = false;
+							}
+						}
+					}
+				} break;
+
+				case OBJ_ENEMY_PROJECTILE:
+				case OBJ_ENEMY_JUMPER:
+				case OBJ_ENEMY_SWORD_SWIPE:
+				case OBJ_ENEMY_SWOOPER:
+				case OBJ_STANDIN:
+				{
+					CreateGameFreezer(0, 20);
+
+					oldCameraW = Camera.width;
+					oldCameraH = Camera.height;
+					animName = anim->name;
+					anim->name = "girl_getting_hit";
+					AnimationUpdate(goId);
+					Camera.width *= 0.9f;
+					Camera.height *= 0.9f;
+					resetAfterHit = true;
+
+					DecrementCounter(&(OTH(healthBarID, counters)->counters), HEALTH_BAR_PLAYER_HEALTH);
+					collider->mask = 0;
+					SetCounter(&counters->counters2, PLYR_INVICIBLE, 60);
+
+				} break;
+
+
+				case OBJ_KNOCKBACK:
+				{
+					phys->vel = OTH(othID, physics)->vel;
+					SetCounter(&counters->counters2, PLYR_KNOCKBACK, 30);
+				} break;
 				/*
 				case OBJ_CRYSTAL_GENERATOR:
 				{
@@ -2506,6 +3250,34 @@ UPDATE_FUNCTION(PlayerUpdate)
 	DecrementCounter(&counters->counters, PLYR_NEXT_SHOT);
 	*/
 
+	tile_collision_info info;
+	info.maxFallSpeed = -0x800;
+	info.headHalfWidth = 4 << 9;
+	if (flag->bits & ON_LADDER)
+		info.headHalfWidth = 3 << 9;
+	info.headHeight = 15 << 9;
+	if ((flag->bits & SLIDING) || (flag->bits & SKIDDING))
+		info.headHeight = 8 << 9;
+
+	info.bodyHalfWidth = 6 << 9;
+	if (flag->bits & HOLDING_JUMP)
+		info.gravity = -22;
+	else
+		info.gravity = -36;
+
+	int maxSlidingVelocity = 0x460;
+	int maxRunningVelocity = 0x280;
+	info.maxVelocity = ((flag->bits & SLIDING) || (flag->bits & SKIDDING)) ? maxSlidingVelocity : maxRunningVelocity;
+	info.horizontalDamping = 12;
+	info.airborneHorizontalDamping = 2;
+
+	if (knockBack)
+	{
+		info.maxVelocity = 0x1000;
+		info.horizontalDamping = 8;
+	}
+
+
 	//check for crush condition
 	bool crushed = false;
 	if (rider->pushedV)
@@ -2519,8 +3291,9 @@ UPDATE_FUNCTION(PlayerUpdate)
 		rider->pushedH = 0;
 	}
 
-	phys->vel.y = Max(-0x400, phys->vel.y);
+	phys->vel.y = Max(info.maxFallSpeed, phys->vel.y);
 
+	int oldYVel = phys->vel.y;
 	bool wasOnGround = flag->bits & ON_GROUND;
 	flag->bits &= ~ON_GROUND;
 	IncrementCounterNoLoop(&counters->counters, PLYR_SINCE_LEFT_GROUND);
@@ -2533,7 +3306,7 @@ UPDATE_FUNCTION(PlayerUpdate)
 	TestPoints[2].p = {tx->pos.x + (3 << 9), tx->pos.y - (1 << 9)};
 	TestPoints[2].type = POINT_BOTTOM;
 
-	PlatformTest(TestPoints + 0, 3);
+	PlatformTest(goId, TestPoints + 0, 3);
 
 	uint8_t centerFootT = TileAtPoint(TestPoints[0].p, tx->oldY);
 	uint8_t leftFootT = TileAtPoint(TestPoints[1].p, tx->oldY);
@@ -2687,16 +3460,12 @@ UPDATE_FUNCTION(PlayerUpdate)
 	IncrementCounterNoLoop(&counters->counters, PLYR_TIME_SINCE_JUMP);
 
 
-	int headHalfW = 4 << 9;
-	if (flag->bits & ON_LADDER)
-		headHalfW = 3 << 9;
-
-	TestPoints[9].p = {tx->pos.x - headHalfW, tx->pos.y + (15 << 9)};
+	TestPoints[9].p = {tx->pos.x - info.headHalfWidth, tx->pos.y + info.headHeight};
 	TestPoints[9].type = POINT_TOP;
-	TestPoints[10].p = {tx->pos.x + headHalfW, tx->pos.y + (15 << 9)};
+	TestPoints[10].p = {tx->pos.x + info.headHalfWidth, tx->pos.y + info.headHeight};
 	TestPoints[10].type = POINT_TOP;
 
-	PlatformTest(TestPoints + 9, 2);
+	PlatformTest(goId, TestPoints + 9, 2);
 
 
 	bool colHead = false;
@@ -2705,19 +3474,19 @@ UPDATE_FUNCTION(PlayerUpdate)
 	if (TileAtPoint(TestPoints[9].p) == SQUARE || TileAtPoint(TestPoints[10].p) == SQUARE)
 	{
 		colHead = true;
-		int tileYatHead = (((tx->pos.y + (15 << 9)) >> 12) << 12);
-		colPointHead = tileYatHead - (16 << 9);
+		int tileYatHead = (((tx->pos.y + info.headHeight) >> 12) << 12);
+		colPointHead = tileYatHead - info.headHeight - (1 << 9);
 	}
 
 	if (TestPoints[9].hitting)
 	{
 		colHead = true;
-		colPointHead = Min(TestPoints[9].limit - (16 << 9), colPointHead);
+		colPointHead = Min(TestPoints[9].limit - info.headHeight - (1 << 9), colPointHead);
 	}
 	if (TestPoints[10].hitting)
 	{
 		colHead = true;
-		colPointHead = Min(TestPoints[10].limit - (16 << 9), colPointHead);
+		colPointHead = Min(TestPoints[10].limit - info.headHeight - (1 << 9), colPointHead);
 	}
 
 	if (phys->vel.y > 0)
@@ -2731,28 +3500,29 @@ UPDATE_FUNCTION(PlayerUpdate)
 
 
 	int foot1 = 3;
-	int foot2 = 11;
-	int foot3 = 15;
+	int foot2 = (((info.headHeight >> 9) - 3) / 2) + 3;
+	int foot3 = (info.headHeight >> 9);
 
+	collider->ur.y = info.headHeight;
 	if ((flag->bits & SLIDING) || (flag->bits & SKIDDING))
 	{
 		foot2 = foot3 = 8;
 	}
 
-	TestPoints[3].p = {tx->pos.x - (6 << 9), tx->pos.y + (foot1 << 9)};
+	TestPoints[3].p = {tx->pos.x - info.bodyHalfWidth, tx->pos.y + (foot1 << 9)};
 	TestPoints[3].type = POINT_LEFT;
-	TestPoints[4].p = {tx->pos.x - (6 << 9), tx->pos.y + (foot2 << 9)};
+	TestPoints[4].p = {tx->pos.x - info.bodyHalfWidth, tx->pos.y + (foot2 << 9)};
 	TestPoints[4].type = POINT_LEFT;
-	TestPoints[5].p = {tx->pos.x - (6 << 9), tx->pos.y + (foot3 << 9)};
+	TestPoints[5].p = {tx->pos.x - info.bodyHalfWidth, tx->pos.y + (foot3 << 9)};
 	TestPoints[5].type = POINT_LEFT;
-	TestPoints[6].p = {tx->pos.x + (6 << 9), tx->pos.y + (foot1 << 9)};
+	TestPoints[6].p = {tx->pos.x + info.bodyHalfWidth, tx->pos.y + (foot1 << 9)};
 	TestPoints[6].type = POINT_RIGHT;
-	TestPoints[7].p = {tx->pos.x + (6 << 9), tx->pos.y + (foot2 << 9)};
+	TestPoints[7].p = {tx->pos.x + info.bodyHalfWidth, tx->pos.y + (foot2 << 9)};
 	TestPoints[7].type = POINT_RIGHT;
-	TestPoints[8].p = {tx->pos.x + (6 << 9), tx->pos.y + (foot3 << 9)};
+	TestPoints[8].p = {tx->pos.x + info.bodyHalfWidth, tx->pos.y + (foot3 << 9)};
 	TestPoints[8].type = POINT_RIGHT;
 
-	PlatformTest(TestPoints + 3, 6);
+	PlatformTest(goId, TestPoints + 3, 6);
 
 
 	bool colLeft = false;
@@ -2764,14 +3534,14 @@ UPDATE_FUNCTION(PlayerUpdate)
 	{
 		if ((!continuousSlope && TileAtPoint(TestPoints[3].p) == SQUARE) || (TileAtPoint(TestPoints[4].p) == SQUARE) || (TileAtPoint(TestPoints[5].p) == SQUARE))
 		{
-			int tileX = (tx->pos.x - (6 << 9)) >> 12;
-			colPointL = ((tileX + 1) << 12) + (6 << 9);
+			int tileX = (tx->pos.x - info.bodyHalfWidth) >> 12;
+			colPointL = ((tileX + 1) << 12) + info.bodyHalfWidth;
 			colLeft = true;
 		}
 		if ((!continuousSlope && TileAtPoint(TestPoints[6].p) == SQUARE) || (TileAtPoint(TestPoints[7].p) == SQUARE) || (TileAtPoint(TestPoints[8].p) == SQUARE))
 		{
-			int tileX = (tx->pos.x + (6 << 9)) >> 12;
-			colPointR = ((tileX) << 12) - (6 << 9);
+			int tileX = (tx->pos.x + info.bodyHalfWidth) >> 12;
+			colPointR = ((tileX) << 12) - info.bodyHalfWidth;
 			colRight = true;
 		}
 	}
@@ -2779,33 +3549,33 @@ UPDATE_FUNCTION(PlayerUpdate)
 	if (TestPoints[3].hitting)
 	{
 		colLeft = true;
-		colPointL = Max(TestPoints[3].limit + (6 << 9), colPointL);
+		colPointL = Max(TestPoints[3].limit + info.bodyHalfWidth, colPointL);
 	}
 	if (TestPoints[4].hitting)
 	{
 		colLeft = true;
-		colPointL = Max(TestPoints[4].limit + (6 << 9), colPointL);
+		colPointL = Max(TestPoints[4].limit + info.bodyHalfWidth, colPointL);
 	}
 	if (TestPoints[5].hitting)
 	{
 		colLeft = true;
-		colPointL = Max(TestPoints[5].limit + (6 << 9), colPointL);
+		colPointL = Max(TestPoints[5].limit + info.bodyHalfWidth, colPointL);
 	}
 
 	if (TestPoints[6].hitting)
 	{
 		colRight = true;
-		colPointR = Min(TestPoints[6].limit - (6 << 9), colPointR);
+		colPointR = Min(TestPoints[6].limit - info.bodyHalfWidth, colPointR);
 	}
 	if (TestPoints[7].hitting)
 	{
 		colRight = true;
-		colPointR = Min(TestPoints[7].limit - (6 << 9), colPointR);
+		colPointR = Min(TestPoints[7].limit - info.bodyHalfWidth, colPointR);
 	}
 	if (TestPoints[8].hitting)
 	{
 		colRight = true;
-		colPointR = Min(TestPoints[8].limit - (6 << 9), colPointR);
+		colPointR = Min(TestPoints[8].limit - info.bodyHalfWidth, colPointR);
 	}
 
 	if (colLeft)
@@ -2823,6 +3593,105 @@ UPDATE_FUNCTION(PlayerUpdate)
 		tx->pos.x = colPointR;
 		flag->bits &= ~ON_LADDER;
 	}
+
+	TestPoints[3].p = {tx->pos.x - info.bodyHalfWidth - (1 << 9), tx->pos.y + (foot1 << 9)};
+	TestPoints[3].type = POINT_LEFT;
+	PlatformTest(goId, TestPoints + 3, 1);
+	TestPoints[6].p = {tx->pos.x + info.bodyHalfWidth + (1 << 9), tx->pos.y + (foot1 << 9)};
+	TestPoints[6].type = POINT_RIGHT;
+	PlatformTest(goId, TestPoints + 6, 1);
+
+	//test if it is possible to wall jump
+	if ((TileAtPoint(TestPoints[3].p) == SQUARE) || TestPoints[3].hitting)
+		flag->bits |= WALL_ON_LEFT;
+	else
+		flag->bits &= ~WALL_ON_LEFT;
+	
+	if ((TileAtPoint(TestPoints[6].p) == SQUARE) || TestPoints[6].hitting)
+		flag->bits |= WALL_ON_RIGHT;
+	else
+		flag->bits &= ~WALL_ON_RIGHT;
+
+	//reset our ability to wall jump if we land on the ground
+	if (flag->bits & ON_GROUND)
+	{
+		flag->bits &= ~USED_WALL_JUMP;
+		flag->bits &= ~ON_WALL;
+		flag->bits &= ~WALL_JUMPING;
+	}
+
+	if (!(flag->bits & ON_GROUND) && !(flag->bits & USED_WALL_JUMP) && !(flag->bits & ON_WALL))
+	{
+		if (((flag->bits & WALL_ON_LEFT) && keyLeftDown) || ((flag->bits & WALL_ON_RIGHT) && keyRightDown))
+		{
+			flag->bits |= ON_WALL;
+			SetCounter(&counters->counters, PLYR_WALL_TIME, 0);
+		}
+	}
+
+	//allow a few frames to wall jump
+	if (flag->bits & ON_WALL)
+	{
+		//first check if we can still wall jump
+		uint8_t wallTime = GetCounter(counters->counters, PLYR_WALL_TIME);
+		
+		//don't count our wall time if we are sliding up the wall
+		if (phys->vel.y < 0)
+			IncrementCounter(&counters->counters, PLYR_WALL_TIME);
+
+		if (wallTime > 15 || !((flag->bits & WALL_ON_LEFT) || (flag->bits & WALL_ON_RIGHT)))
+		{
+			flag->bits |= USED_WALL_JUMP;
+			flag->bits &= ~ON_WALL;
+			flag->bits &= ~WALL_JUMPING;
+		}
+		else
+		{
+			//if we are initiating the wall jump (pressing the opposite direction, about to jump)
+			if (!(flag->bits & WALL_JUMPING) && (((flag->bits & WALL_ON_LEFT) && keyRightDown) || 
+												 ((flag->bits & WALL_ON_RIGHT) && keyLeftDown)))
+			{
+				flag->bits |= WALL_JUMPING;
+				SetCounter(&counters->counters, PLYR_WALL_TIME, 0);
+			}
+			if (flag->bits & WALL_JUMPING)
+			{
+				uint8_t wallJumpTimeLeft = IncrementCounter(&counters->counters, PLYR_WALL_TIME);
+				if (wallJumpTimeLeft > 15 || ((flag->bits & WALL_ON_LEFT) && !keyRightDown) || 
+											 ((flag->bits & WALL_ON_RIGHT) && !keyLeftDown))
+				{
+					flag->bits |= USED_WALL_JUMP;
+					flag->bits &= ~ON_WALL;
+					flag->bits &= ~WALL_JUMPING;
+				}
+			}
+			if (keyAction1Pressed)
+			{
+				//jump
+				flag->bits |= USED_WALL_JUMP;
+				flag->bits &= ~ON_WALL;
+				flag->bits &= ~WALL_JUMPING;
+
+				if (flag->bits & WALL_ON_LEFT)
+				{
+					phys->vel.x = 0x240;
+					tx->scale.x = Abs(tx->scale.x);
+				}
+				else
+				{
+					phys->vel.x = -0x240;
+					tx->scale.x = -Abs(tx->scale.x);
+				}
+
+				phys->vel.y = 0x370;
+				anim->name = "girl_jumping";
+				anim->frameTime = 0;
+				anim->loop = false;
+				anim->playing = true;
+			}
+		}
+	}
+
 
 	if (flag->bits & ON_LADDER)
 	{
@@ -2908,17 +3777,19 @@ UPDATE_FUNCTION(PlayerUpdate)
 		flag->bits &= ~SLIDING;
 	}
 
-	int maxSlidingVelocity = 0x420;
-	int maxRunningVelocity = 0x220;
-	int escapeFromSkidVelocity = 0x100;
-	int maxVelocity = ((flag->bits & SLIDING) || (flag->bits & SKIDDING)) ? maxSlidingVelocity : maxRunningVelocity;
+	int escapeFromSkidVelocity = 0x140;
+	int maxVelocity = info.maxVelocity;
 
-	int horizontalDamping = 12;
-	int horizontalImpulse = 28;
+	int horizontalDamping = info.horizontalDamping;
+	int horizontalImpulse = 36;
 	if (!(flag->bits & ON_GROUND))
 	{
-		horizontalDamping = 2;
+		horizontalDamping = info.airborneHorizontalDamping;
 		horizontalImpulse = 15;
+	}
+	if (flag->bits & WALL_JUMPING)
+	{
+		horizontalImpulse = 0;
 	}
 
 	phys->accel.x = 0;
@@ -3008,10 +3879,6 @@ UPDATE_FUNCTION(PlayerUpdate)
 			tx->scale.x = 1;
 			if ((flag->bits & SKIDDING) || (flag->bits & SLIDING))
 				tx->scale.x = (flag->bits & SLIDE_LEFT) ? -1 : 1;
-			if (phys->vel.x > maxVelocity + 40)
-			{
-				int x = 2;
-			}
 			if (phys->vel.x > maxVelocity)
 				phys->vel.x = maxVelocity;
 		}
@@ -3053,7 +3920,12 @@ UPDATE_FUNCTION(PlayerUpdate)
 			tx->scale.x = horzImpSign;
 	}
 
-	if (flag->bits & ON_GROUND)
+	if (knockBack)
+	{
+		anim->name = "girl_getting_hit";
+		tx->scale.x = phys->vel.x > 0 ? -1 : 1;
+	}
+	else if (flag->bits & ON_GROUND)
 	{
 		anim->playing = true;
 		anim->loop = true;
@@ -3095,6 +3967,33 @@ UPDATE_FUNCTION(PlayerUpdate)
 	}
 
 	rider->size.y = (foot3 << 9);
+
+	if (!wasOnGround && (flag->bits & ON_GROUND) && oldYVel < -0x300)
+	{
+		if (phys->vel.x > 0x200)
+			CreateAnimatedParticles(tx->pos, DUST_SINGLE_SIDED_PUFF, false, 0);
+		else if (phys->vel.x < -0x200)
+			CreateAnimatedParticles(tx->pos, DUST_SINGLE_SIDED_PUFF, true, 0);
+		else
+		{
+			CreateAnimatedParticles(tx->pos, DUST_SINGLE_SIDED_PUFF, true, 0);
+			CreateAnimatedParticles(tx->pos, DUST_SINGLE_SIDED_PUFF, false, 0);
+		}
+	}
+
+	if ((flag->bits & ON_GROUND) && Abs(phys->vel.x) > 0x200)
+	{
+		uint8_t runningDust = IncrementCounter(&counters->counters2, PLYR_CREATE_DUST);
+		if (runningDust > (rand() % 8 + 8))
+		{
+			SetCounter(&counters->counters2, PLYR_CREATE_DUST, 0);
+			CreateAnimatedParticles(tx->pos, DUST_RUNNING_PUFF, true, 0);
+		}
+	}
+	else
+	{
+		SetCounter(&counters->counters2, PLYR_CREATE_DUST, 0);
+	}
 }
 
 
@@ -3129,6 +4028,801 @@ UPDATE_FUNCTION(PlatformUpdate)
 				SetCounter(&counters->counters, 0, 0);
 			}
 		} break;
+	}
+}
+
+enum arrow_flags
+{
+	ARROW_IN_FLIGHT				= 0x1,
+	ARROW_FLYING_LEFT			= 0x2,
+	ARROW_FLYING_RIGHT			= 0x4,
+};
+
+enum arrow_counters
+{
+	ARROW_WOBBLE				= 0,
+};
+
+UPDATE_FUNCTION(ArrowUpdate)
+{
+	auto tx = GO(transform);
+	auto phys = GO(physics);
+	auto collider = GO(collider);
+	auto flag = GO(custom_flags);
+	auto parent = GO(parent);
+	auto counters = GO(counters);
+
+
+	if (flag->bits & ARROW_IN_FLIGHT)
+	{
+		for (int i = 0; i < ArrayCount(collider->collisions); i++)
+		{
+			int othID = collider->collisions[i];
+			if (othID != -1)
+			{
+				object_type type = GameComponents.type[GameObjectIDs[othID].index];
+				switch (type)
+				{
+					case OBJ_PLAYER:
+					{
+						RemoveObject(goId);
+					} break;
+
+					case OBJ_SWORD_SWIPE:
+					{
+						RemoveObject(goId);
+					} break;
+
+					default: {} break;
+				}
+			}
+			else
+				break;
+		}
+
+
+		if (flag->bits & ARROW_FLYING_LEFT)
+		{
+			test_point TestPoints[1] = {};
+			TestPoints[0].p = {tx->pos.x, tx->pos.y + (1 << 9)};
+			TestPoints[0].type = POINT_LEFT;
+			PlatformTest(goId, TestPoints, 1);
+
+			bool colLeft = false;
+			int32_t colPointL = INT_MIN;
+
+			if (TileAtPoint(TestPoints[0].p) == SQUARE)
+			{
+				int tileX = (tx->pos.x - (1<<9)) >> 12;
+				colPointL = ((tileX + 1) << 12) + (1 << 9);
+				colLeft = true;
+			}
+			if (TestPoints[0].hitting)
+			{
+				colLeft = true;
+				int oldColPointL = colPointL;
+				colPointL = Max(TestPoints[0].limit + (1<<9), colPointL);
+
+				if (colPointL != oldColPointL)
+				{
+					parent->parentID = TestPoints[0].platformID;
+					parent->offset = OTH(parent->parentID, transform)->pos - tx->pos;
+				}
+			}
+
+			if (colLeft)
+			{
+				phys->vel.x = 0;
+				collider->mask = 0;
+				flag->bits &= ~ARROW_IN_FLIGHT;
+				SetCounter(&counters->counters, ARROW_WOBBLE, 40);
+			}
+		}
+		else if (flag->bits & ARROW_FLYING_RIGHT)
+		{
+			test_point TestPoints[1] = {};
+			TestPoints[0].p = {tx->pos.x, tx->pos.y + (1 << 9)};
+			TestPoints[0].type = POINT_RIGHT;
+			PlatformTest(goId, TestPoints, 1);
+
+			bool colRight = false;
+			int32_t colPointR = INT_MIN;
+
+			if (TileAtPoint(TestPoints[0].p) == SQUARE)
+			{
+				int tileX = (tx->pos.x + (1<<9)) >> 12;
+				colPointR = ((tileX + 1) << 12) - (1 << 9);
+				colRight = true;
+			}
+			if (TestPoints[0].hitting)
+			{
+				colRight = true;
+				int oldColPointR = colPointR;
+				colPointR = Max(TestPoints[0].limit - (1<<9), colPointR);
+
+				if (colPointR != oldColPointR)
+				{
+					parent->parentID = TestPoints[0].platformID;
+					parent->offset = OTH(parent->parentID, transform)->pos - tx->pos;
+				}
+			}
+
+			if (colRight)
+			{
+				phys->vel.x = 0;
+				collider->mask = 0;
+				flag->bits &= ~ARROW_IN_FLIGHT;
+				SetCounter(&counters->counters, ARROW_WOBBLE, 40);
+			}
+		}
+	}
+	else
+	{
+		if (parent->parentID > -1)
+			tx->pos = OTH(parent->parentID, transform)->pos - parent->offset;
+	}
+
+	if (DecrementCounter(&counters->counters, ARROW_WOBBLE) > 0)
+	{
+		tx->rot = 8 * sinf(GetCounter(counters->counters, ARROW_WOBBLE) * 0.4f) * (GetCounter(counters->counters, ARROW_WOBBLE) / 20.0f);
+		if (flag->bits & ARROW_FLYING_RIGHT)
+			tx->rot += 180;
+	}
+}
+
+void CreateArrow(ivec2 pos, bool left)
+{
+	int goId = AddObject(OBJ_ENEMY_PROJECTILE);
+	auto meta = GO(metadata);
+	auto tx = GO(transform);
+	auto phys = GO(physics);
+	auto update = GO(update);
+	auto sprite = GO(sprite);
+	auto flag = GO(custom_flags);
+	auto collider = GO(collider);
+	auto parent = GO(parent);
+	meta->cmpInUse = UPDATE | CUSTOM_FLAGS | PHYSICS | TRANSFORM | SPRITE | COLLIDER | PARENT;
+	meta->flags |= GAME_OBJECT;
+	InitObject(goId);
+
+	update->update = ArrowUpdate;
+	sprite->name = "Arrow";
+	sprite->depth = 4;
+	collider->ur = ivec2((2<<9), (1<<9));
+	collider->bl = ivec2(-(1<<9), -(1<<9));
+	tx->pos = pos;
+	tx->rot = left ? 0 : 180;
+	phys->vel.x = left ? -0x360 : 0x360;
+	parent->parentID = -1;
+	flag->bits |= (left ? ARROW_FLYING_LEFT : ARROW_FLYING_RIGHT);
+	flag->bits |= ARROW_IN_FLIGHT;
+}
+
+
+UPDATE_FUNCTION(EnemySwordUpdate)
+{
+	auto tx = GO(transform);
+	auto anim = GO(anim);
+	auto parent = GO(parent);
+	auto flag = GO(custom_flags);
+	auto collider = GO(collider);
+	tx->pos = OTH(parent->parentID, transform)->pos;
+
+	int playerSwordID = GetFirstOfType(OBJ_SWORD_SWIPE);
+	if (playerSwordID > -1)
+	{
+		int minX = tx->pos.x + collider->bl.x;
+		int minY = tx->pos.y + collider->bl.y;
+		int maxX = tx->pos.x + collider->ur.x;
+		int maxY = tx->pos.y + collider->ur.y;
+
+		auto othTx = OTH(playerSwordID, transform);
+		auto othCollider = OTH(playerSwordID, collider);
+		int othMinX = othTx->pos.x + othCollider->bl.x;
+		int othMinY = othTx->pos.y + othCollider->bl.y;
+		int othMaxX = othTx->pos.x + othCollider->ur.x;
+		int othMaxY = othTx->pos.y + othCollider->ur.y;
+
+		if (minX <= othMaxX && maxX >= othMinX && minY <= othMaxY && maxY >= othMinY)
+		{
+			auto othAnim = OTH(playerSwordID, anim);
+			bool playerOnRight = (othTx->pos.x - tx->pos.x > 0);
+			if (Abs(othAnim->frameTime - anim->frameTime) < 0.1f) //swung at the same time
+			{
+				CreateKnockBack(othTx->pos, (playerOnRight ? ivec2(0x400,0) : ivec2(-0x400,0)));
+				CreateKnockBack(tx->pos, (playerOnRight ? ivec2(-0x400,0) : ivec2(0x400,0)));
+			}
+			else if (othAnim->frameTime > anim->frameTime) //player swung first
+			{
+				CreateKnockBack(tx->pos, (playerOnRight ? ivec2(-0x700,0) : ivec2(0x700,0)));
+			}
+			else //enemy swung first
+			{
+				CreateKnockBack(othTx->pos, (playerOnRight ? ivec2(0x700,0) : ivec2(-0x700,0)));
+			}
+		}
+	}
+
+
+	if (!(flag->bits & SWORD_INITIALIZED) && !(flag->bits & SWORD_COLLISION_TESTED))
+	{
+		flag->bits |= SWORD_INITIALIZED;
+		collider->mask = 0xffff;
+	}
+	else if (!(flag->bits & SWORD_COLLISION_TESTED))
+	{
+		flag->bits |= SWORD_COLLISION_TESTED;
+		collider->mask = 0;
+	}
+
+	if (!anim->playing)
+	{
+		RemoveObject(goId);
+	}
+}
+
+
+void CreateEnemySwordSwipe(int parentID, ivec2 pos, uint32_t dir)
+{
+	int goId = AddObject(OBJ_ENEMY_SWORD_SWIPE);
+	auto meta = GO(metadata);
+	auto tx = GO(transform);
+	auto anim = GO(anim);
+	auto collider = GO(collider);
+	auto update = GO(update);
+	auto parent = GO(parent);
+	auto flag = GO(custom_flags);
+	meta->cmpInUse = CUSTOM_FLAGS | UPDATE | PARENT | TRANSFORM | COLLIDER | SPRITE | ANIM;
+	meta->flags |= GAME_OBJECT;
+	InitObject(goId);
+	tx->pos = pos;
+	anim->loop = false;
+	anim->playing = true;
+	anim->frameTime = 0;
+	update->update = EnemySwordUpdate;
+	flag->bits |= dir;
+
+	if (flag->bits & SWIPE_RIGHT)
+	{
+		collider->ur = ivec2((20 << 9), (7 << 9));
+		collider->bl = ivec2(0, -(7 << 9));
+		tx->scale.x = 0.5f;
+		anim->name = "sword_side";
+	}
+	else if (flag->bits & SWIPE_LEFT)
+	{
+		collider->ur = ivec2(0, (7 << 9));
+		collider->bl = ivec2(-(20 << 9), -(7 << 9));
+		tx->scale.x = -0.5f;
+		anim->name = "sword_side";
+	} 
+	else if (flag->bits & SWIPE_UP)
+	{
+		collider->ur = ivec2((7 << 9), (20 << 9));
+		collider->bl = ivec2(-(7 << 9), 0);
+		tx->scale.y = 0.5f;
+		anim->name = "sword_up";
+	} 
+	else if (flag->bits & SWIPE_DOWN)
+	{
+		collider->ur = ivec2((7 << 9), 0);
+		collider->bl = ivec2(-(7 << 9), -(20 << 9));
+		tx->scale.y = 0.5f;
+		anim->name = "sword_down";
+	} 
+
+	collider->mask = 0;
+	parent->parentID = parentID;
+}
+
+enum standin_flags
+{
+	STANDIN_DEAD					= 0x100000,
+};
+
+enum standin_counters
+{
+};
+
+
+UPDATE_FUNCTION(StandinUpdate)
+{
+	auto phys = GO(physics);
+	auto tx = GO(transform);
+	auto flag = GO(custom_flags);
+	auto sprite = GO(sprite);
+	auto counters = GO(counters);
+	auto collider = GO(collider);
+	auto rider = GO(rides_platforms);
+
+	if (strcmp(sprite->name, "EnemyStandinDamaged") == 0)
+	{
+		uint8_t deadTime = DecrementCounter(&counters->counters, 0);
+		if (deadTime % 10 == 1)
+		{
+			CreateAnimatedParticles(tx->pos, BLOOD_SPLATTER_UP, true, phys->vel.x > 0 ? 70 : -70);
+		}
+		if (phys->vel.y == 0 && deadTime == 0)
+		{
+			sprite->name = "EnemyStandinCorpse";
+		}
+	}
+
+
+	for (int i = 0; i < ArrayCount(collider->collisions); i++)
+	{
+		int othID = collider->collisions[i];
+		if (othID != -1)
+		{
+			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			switch (type)
+			{
+				case OBJ_KNOCKBACK:
+				{
+					phys->vel = OTH(othID, physics)->vel;
+				} break;
+
+				case OBJ_SWORD_SWIPE:
+				{
+					collider->mask = 0;
+					sprite->name = "EnemyStandinDamaged";
+					SetCounter(&counters->counters, 0, 40);
+					auto othFlag = OTH(othID, custom_flags);
+
+					CreateGameFreezer(2, 8);
+					flag->bits |= STANDIN_DEAD;
+
+					if (othFlag->bits & SWIPE_LEFT)
+					{
+						phys->vel.x = -0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, false, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, 70);
+					}
+					else if (othFlag->bits & SWIPE_RIGHT)
+					{
+						phys->vel.x = 0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2(-(6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, true, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, -70);
+					}
+					else if (othFlag->bits & SWIPE_UP)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = 0x320;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+					}
+					else if (othFlag->bits & SWIPE_DOWN)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = -0x200;
+						flag->bits &= ~ON_SLOPE;
+					}
+				} break;
+
+				default: {} break;
+			}
+		}
+		else
+			break;
+	}
+
+	tile_collision_info tileInfo;
+	tileInfo.maxFallSpeed = -0x600;
+	tileInfo.headHalfWidth = 3072;
+	tileInfo.headHeight = 6144;
+	tileInfo.bodyHalfWidth = 4096;
+	tileInfo.gravity = -36;
+	tileInfo.maxVelocity = 0x400;
+	tileInfo.horizontalDamping = 20;
+	tileInfo.airborneHorizontalDamping = 6;
+
+	EnemyTileCollisions(goId, &tileInfo);
+}
+
+enum jumper_enemy_counters
+{
+	JUMPER_TIME_TIL_JUMP		= 0,
+	JUMPER_FIRE_ARROW			= 1,
+};
+
+enum jumper_enemy_flags
+{
+	JUMPER_DEAD					= 0x100000,
+	JUMPER_JUMPING				= 0x200000,
+};
+
+
+
+UPDATE_FUNCTION(JumperUpdate)
+{
+	auto phys = GO(physics);
+	auto tx = GO(transform);
+	auto flag = GO(custom_flags);
+	auto sprite = GO(sprite);
+	auto counters = GO(counters);
+	auto collider = GO(collider);
+	auto rider = GO(rides_platforms);
+
+	auto playerID = GetFirstOfType(OBJ_PLAYER);
+
+	if (!(flag->bits & JUMPER_DEAD) && (flag->bits & JUMPER_JUMPING) && (flag->bits & ON_GROUND))
+	{
+		sprite->name = "JumpingEnemy1";
+		flag->bits &= ~JUMPER_JUMPING;
+	}
+
+	if (!(flag->bits & JUMPER_DEAD) && (flag->bits & ON_GROUND))
+	{
+		if (IncrementCounter(&counters->counters2, JUMPER_FIRE_ARROW) == 250)
+		{
+			SetCounter(&counters->counters2, JUMPER_FIRE_ARROW, 0);
+			if (playerID > -1)
+			{
+				bool playerOnRight = OTH(playerID, transform)->pos.x - tx->pos.x > 0;
+				CreateArrow(tx->pos + (playerOnRight ? ivec2(9<<9, 8<<9) : ivec2(-(9<<9),8<<9)), (playerOnRight ? false : true));
+			}
+		}
+		if (DecrementCounter(&counters->counters2, JUMPER_TIME_TIL_JUMP) == 0)
+		{
+			if (playerID > -1)
+			{
+				auto playerTx = OTH(playerID, transform);
+				if (Abs(playerTx->pos.x - tx->pos.x) < (80 << 9))
+				{
+					bool jumpRight = playerTx->pos.x - tx->pos.x > 0;
+					phys->vel.x = jumpRight ? 0x320 : -0x320;
+					phys->vel.y = 0x380;
+					tx->pos.y += (2 << 9);
+					tx->scale.x = jumpRight ? -1 : 1;
+					flag->bits &= ~ON_SLOPE;
+					flag->bits &= ~ON_GROUND;
+					SetCounter(&counters->counters2, JUMPER_TIME_TIL_JUMP, 120);
+					flag->bits |= JUMPER_JUMPING;
+					sprite->name = "JumpingEnemy2";
+				}
+			}
+		}
+	}
+
+	if (strcmp(sprite->name, "JumpingEnemy3") == 0)
+	{
+		uint8_t deadTime = DecrementCounter(&counters->counters, 0);
+		if (deadTime % 10 == 1)
+		{
+			CreateAnimatedParticles(tx->pos, BLOOD_SPLATTER_UP, true, phys->vel.x > 0 ? 70 : -70);
+		}
+		if (phys->vel.y == 0 && deadTime == 0)
+		{
+			sprite->name = "JumpingEnemy4";
+		}
+	}
+
+
+	for (int i = 0; i < ArrayCount(collider->collisions); i++)
+	{
+		int othID = collider->collisions[i];
+		if (othID != -1)
+		{
+			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			switch (type)
+			{
+				case OBJ_SWORD_SWIPE:
+				{
+					collider->mask = 0;
+					sprite->name = "JumpingEnemy3";
+					SetCounter(&counters->counters, 0, 40);
+					auto othFlag = OTH(othID, custom_flags);
+
+					flag->bits |= JUMPER_DEAD;
+					CreateGameFreezer(2, 8);
+
+					if (othFlag->bits & SWIPE_LEFT)
+					{
+						phys->vel.x = -0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, false, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, 70);
+					}
+					else if (othFlag->bits & SWIPE_RIGHT)
+					{
+						phys->vel.x = 0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2(-(6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, true, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, -70);
+					}
+					else if (othFlag->bits & SWIPE_UP)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = 0x320;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+					}
+					else if (othFlag->bits & SWIPE_DOWN)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = -0x200;
+						flag->bits &= ~ON_SLOPE;
+					}
+				} break;
+
+				default: {} break;
+			}
+		}
+		else
+			break;
+	}
+
+
+	tile_collision_info tileInfo;
+	tileInfo.maxFallSpeed = -0x600;
+	tileInfo.headHalfWidth = 3072;
+	tileInfo.headHeight = 6144;
+	tileInfo.bodyHalfWidth = 4096;
+	tileInfo.gravity = -36;
+	tileInfo.maxVelocity = 0x400;
+	tileInfo.horizontalDamping = 20;
+	tileInfo.airborneHorizontalDamping = 6;
+
+	EnemyTileCollisions(goId, &tileInfo);
+}
+
+enum swooper_flags
+{
+	SWOOPER_DEAD				= 0x100000,
+	SWOOPER_SWOOPING			= 0x200000,
+};
+
+enum swooper_counters
+{
+	SWOOPER_BEHAVIOR_MODE			= 0,
+	SWOOPER_BEHAVIOR_MODE_COUNT		= 1,
+	SWOOPER_RANDOM_DIR_COUNT		= 2,
+};
+
+UPDATE_FUNCTION(SwooperSaveAndLoad)
+{
+	if (SaveOrLoad == LOAD)
+	{
+		if (LoadData)
+		{
+			//format [numWaypoints, [waypoint0.x, waypoint0.y], ...]
+			auto waypoints = GO(waypoints);
+			json_array *array = LoadData->array;
+			waypoints->count = array->GetByIndex(0)->number.i;
+			for (int i = 0; i < waypoints->count; i++)
+			{
+				json_array *point = array->GetByIndex(i+1)->array;
+				waypoints->points[i] = ivec2(GetJSONValAsInt(point->GetByIndex(0)), GetJSONValAsInt(point->GetByIndex(1)));
+			}
+		}
+	}
+	else if (SaveOrLoad == SAVE)
+	{
+		auto waypoints = GO(waypoints);
+		sprintf(SaveData, "[ %d, [%d, %d], [%d, %d], [%d, %d] ]", waypoints->count, waypoints->points[0].x, waypoints->points[0].y, 
+																					waypoints->points[1].x, waypoints->points[1].y, 
+																					waypoints->points[2].x, waypoints->points[2].y);
+	}
+}
+
+UPDATE_FUNCTION(SwooperUpdate)
+{
+	auto phys = GO(physics);
+	auto tx = GO(transform);
+	auto flag = GO(custom_flags);
+	auto sprite = GO(sprite);
+	auto counters = GO(counters);
+	auto collider = GO(collider);
+	auto rider = GO(rides_platforms);
+	auto waypoints = GO(waypoints);
+
+	auto playerID = GetFirstOfType(OBJ_PLAYER);
+
+	if (!(flag->bits & SWOOPER_DEAD))
+	{
+		if (IncrementCounter(&counters->counters2, SWOOPER_RANDOM_DIR_COUNT) > 60)
+		{
+			float randomAngle = (rand() % 360) * DEGREES_TO_RADIANS;
+			ivec2 random = ivec2(0x60 * sinf(randomAngle), 0x60 * cosf(randomAngle));
+			phys->vel += random;
+			SetCounter(&counters->counters2, SWOOPER_RANDOM_DIR_COUNT, 0);
+		}
+
+		ivec2 dir;
+		uint8_t mode = GetCounter(counters->counters2, SWOOPER_BEHAVIOR_MODE);
+		switch (mode)
+		{
+			case 0: //moving toward waypoint 0
+			case 1: //moving toward waypoint 1
+			{
+				dir = waypoints->points[mode] - tx->pos;
+				if (length(vec2(dir)) < 0x300)
+				{
+					SetCounter(&counters->counters2, SWOOPER_BEHAVIOR_MODE, (mode + 1) % 2);
+				}
+				//determine if we want to chase the player
+			} break;
+
+			case 2: //chasing player
+			{
+				if (playerID > -1)
+					dir = OTH(playerID, transform)->pos + ivec2(0, 32<<9) - tx->pos; //move to a point 32 pixels above player
+				else
+					SetCounter(&counters->counters2, SWOOPER_BEHAVIOR_MODE, 3);
+
+			} break;
+
+			case 3: //swooping
+			{
+			} break;
+
+			case 4: //recovery
+			{
+			} break;
+
+		}
+
+		if (mode == 0 || mode == 1 || mode == 2)
+		{
+			vec2 dirf = vec2(dir);
+			if (length(dirf) != 0)
+			{
+				dirf = normalize(dirf);
+				vec2 accel = 18.0f * dirf;
+				phys->accel = ivec2(accel);
+				vec2 vel = ivec2(phys->vel.x, phys->vel.y);
+				if (length(vel) > 0x160)
+					vel = (float)0x160 * normalize(vel);
+				phys->vel = ivec2(vel);
+			}
+		}
+	}
+
+	if (strcmp(sprite->name, "Swooper2") == 0)
+	{
+		uint8_t deadTime = DecrementCounter(&counters->counters, 0);
+		if (deadTime % 10 == 1)
+		{
+			CreateAnimatedParticles(tx->pos, BLOOD_SPLATTER_UP, true, phys->vel.x > 0 ? 70 : -70);
+		}
+		if (phys->vel.y == 0 && deadTime == 0)
+		{
+			sprite->name = "Swooper3";
+		}
+	}
+
+
+	for (int i = 0; i < ArrayCount(collider->collisions); i++)
+	{
+		int othID = collider->collisions[i];
+		if (othID != -1)
+		{
+			object_type type = GameComponents.type[GameObjectIDs[othID].index];
+			switch (type)
+			{
+				case OBJ_SWORD_SWIPE:
+				{
+					collider->mask = 0;
+					sprite->name = "Swooper2";
+					SetCounter(&counters->counters, 0, 40);
+					auto othFlag = OTH(othID, custom_flags);
+
+					flag->bits |= SWOOPER_DEAD;
+					phys->accel = ivec2(0, 0);
+					CreateGameFreezer(2, 8);
+
+					if (othFlag->bits & SWIPE_LEFT)
+					{
+						phys->vel.x = -0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, false, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, 70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, 70);
+					}
+					else if (othFlag->bits & SWIPE_RIGHT)
+					{
+						phys->vel.x = 0x350;
+						phys->vel.y = 0x210;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+						CreateAnimatedParticles(tx->pos + ivec2(-(6 << 9), (8 << 9)), BLOOD_SPLATTER_SIDE, true, 0);
+						CreateAnimatedParticles(tx->pos + ivec2((6 << 9), (8 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2((2 << 9), (3 << 9)), BLOOD_SPLATTER_UP, true, -70);
+						CreateAnimatedParticles(tx->pos + ivec2(-(3 << 9), (6 << 9)), BLOOD_SPLATTER_UP, true, -70);
+					}
+					else if (othFlag->bits & SWIPE_UP)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = 0x320;
+						tx->pos.y += (2 << 9);
+						flag->bits &= ~ON_SLOPE;
+						flag->bits &= ~ON_GROUND;
+					}
+					else if (othFlag->bits & SWIPE_DOWN)
+					{
+						phys->vel.x = (rand() % 250) - 125;
+						phys->vel.y = -0x200;
+						flag->bits &= ~ON_SLOPE;
+					}
+				} break;
+
+				default: {} break;
+			}
+		}
+		else
+			break;
+	}
+
+
+	tile_collision_info tileInfo;
+	tileInfo.maxFallSpeed = -0x600;
+	tileInfo.headHalfWidth = 2048;
+	tileInfo.headHeight = 4608;
+	tileInfo.bodyHalfWidth = 3072;
+	tileInfo.maxVelocity = 0x400;
+	if (flag->bits & SWOOPER_DEAD)
+	{
+		tileInfo.gravity = -36;
+		tileInfo.horizontalDamping = 20;
+		tileInfo.airborneHorizontalDamping = 2;
+		tileInfo.setXScale = true;
+	}
+	else
+	{
+		tileInfo.gravity = phys->accel.y;
+		tileInfo.horizontalDamping = 3;
+		tileInfo.airborneHorizontalDamping = 3;
+		tileInfo.setXScale = false;
+	}
+
+	EnemyTileCollisions(goId, &tileInfo);
+}
+
+UPDATE_FUNCTION(DoorSaveAndLoad)
+{
+	if (SaveOrLoad == LOAD)
+	{
+		if (LoadData)
+		{
+			//format [numWaypoints, [waypoint0.x, waypoint0.y], ...]
+			auto str = GO(string_storage);
+			json_array *array = LoadData->array;
+			str->string = array->GetByIndex(0)->string;
+		}
+	}
+	else if (SaveOrLoad == SAVE)
+	{
+		auto str = GO(string_storage);
+		sprintf(SaveData, "[ \"%s\" ]", str->string);
 	}
 }
 
@@ -3250,20 +4944,6 @@ UPDATE_FUNCTION(RainUpdateAndDraw)
 }
 
 
-global_variable bool SavedLevel;
-global_variable char LevelName[64];
-
-UPDATE_FUNCTION(LevelSaver)
-{
-	if (KeyboardPresses[KB_S] && CtrlHeld)
-	{
-		sprintf(DebugMessage, "Saving...");
-		DebugMessageCounter = 60;
-		SerializeLevel(&SavedLevel, LevelName);
-	}
-}
-
-
 UPDATE_FUNCTION(DisplayDebugMessage)
 {
 	if (DebugMessageCounter > 0)
@@ -3351,6 +5031,8 @@ enum editor_mode
 	MOVE_PREFABS,
 	RUNNING_GAME,
 	SELECTING_LEVEL,
+	EDIT_OBJECTS,
+	DEBUG_FUNCTIONS,
 };
 
 const char *editor_mode_names[] = {
@@ -3361,6 +5043,8 @@ const char *editor_mode_names[] = {
 	"MOVE_PREFABS",
 	"RUNNING_GAME",
 	"SELECTING_LEVEL",
+	"EDIT_OBJECTS",
+	"DEBUG_FUNCTIONS",
 };
 
 global_variable editor_mode EditorMode;
@@ -3369,6 +5053,22 @@ global_variable int CameraRestraintID;
 global_variable int PrefabSelectID;
 global_variable int MovePrefabID;
 global_variable int LevelSelectID;
+global_variable int EditObjectID;
+global_variable int DebugFunctionsID;
+
+
+global_variable bool SavedLevel;
+global_variable char LevelName[64];
+
+UPDATE_FUNCTION(LevelSaver)
+{
+	if (KeyboardPresses[KB_S] && CtrlHeld && !(EditorMode == RUNNING_GAME))
+	{
+		sprintf(DebugMessage, "Saving...");
+		DebugMessageCounter = 60;
+		SerializeLevel(&SavedLevel, LevelName);
+	}
+}
 
 void ExitEditorMode()
 {
@@ -3396,10 +5096,20 @@ void ExitEditorMode()
 		case RUNNING_GAME:
 		{
 			SendingGameUpdateEvents = false;
+			LevelLoaderInitialized = false;
+			OnLevel = LoadedLevel;
 		} break;
 		case SELECTING_LEVEL:
 		{
 			RemoveObject(LevelSelectID);
+		} break;
+		case EDIT_OBJECTS:
+		{
+			RemoveObject(EditObjectID);
+		} break;
+		case DEBUG_FUNCTIONS:
+		{
+			RemoveObject(DebugFunctionsID);
 		} break;
 	}
 	EditorMode = NONE;
@@ -3408,9 +5118,33 @@ void ExitEditorMode()
 }
 
 
-global_variable bool LevelLoaderInitialized;
-global_variable int OnLevel = 0;
-global_variable int LoadedLevel = 0;
+UPDATE_FUNCTION(DebugFunctionsUpdateAndDraw)
+{
+	local_persistent int DebugFunctionSelect = 0;
+	SetShader("basic_tex_color");
+	SetFontAsPercentageOfScreen("JackInput", 2.4f);
+	SetFontColor(MAKE_COLOR(255,100,0,255));
+
+	int numDebugFunctions = 0;
+	float curY = 94;
+
+	{
+		if (DebugFunctionSelect == numDebugFunctions++)
+		{
+			DrawTextGui(2, curY, " >>");
+			if (KeyboardPresses[KB_ENTER])
+			{
+			}
+		}
+		DrawTextGui(5, curY, "Reload Data Pak");
+	}
+	
+		
+	if (KeyboardPresses[KB_UP])
+		DebugFunctionSelect = Max(0, DebugFunctionSelect - 1);
+	if (KeyboardPresses[KB_DOWN])
+		DebugFunctionSelect = Min(numDebugFunctions - 1, DebugFunctionSelect + 1);
+}
 
 UPDATE_FUNCTION(LevelSelect)
 {
@@ -3428,9 +5162,9 @@ UPDATE_FUNCTION(LevelSelect)
 	{
 		json_data_file *file = (json_data_file *)value;
 		if (OnLevel == curLevel)
-			DrawTextGui(2, curY, " >> %s", file->file->name);
+			DrawTextGui(2, curY, " >> %s", file->fileName);
 		else
-			DrawTextGui(2, curY, "    %s", file->file->name);
+			DrawTextGui(2, curY, "    %s", file->fileName);
 
 		if (KeyboardReleases[KB_ENTER] && OnLevel == curLevel)
 		{
@@ -3470,22 +5204,41 @@ UPDATE_FUNCTION(LevelLoader)
 			{
 				json_data_file *file = (json_data_file *)value;
 				SavedLevel = true;
-				strcpy(LevelName, file->file->name);
+				strcpy(LevelName, file->fileName);
 
 				{
 					//remove any old objects
-					for (int i = NumLevelObjects - 1; i >= 0; i--)
-						DeleteLevelObject(i);
+					for (int i = 0; i < idCount; i++)
+					{
+						if (GameObjectIDs[i].inUse && (OTH(i,metadata)->flags & GAME_OBJECT))
+						{
+							RemoveObject(i);
+						}
+					}
+
+					ProcessObjectRemovals();
+					
 					NumLevelObjects = 0;
 					for (int x = 0; x < MAP_W; x++)
+					{
 						for (int y = 0; y < MAP_H; y++)
 						{
 							TileMapV[y*MAP_W + x] = 0;
 							TileMapI[y*MAP_W + x] = 0;
 						}
+					}
 					NumCameraRestraintAreas = 0;
 
 					ReadInJsonDataFromDirectory(&LevelFolder, &Levels);
+
+					json_value *initialCamera = file->val->hash->GetByKey("InitialCamera");
+					InitialCameraPos = ivec2(4000<<9,4000<<9);
+					if (initialCamera)
+						InitialCameraPos = ivec2(GetJSONValAsInt(initialCamera->array->GetByIndex(0)), GetJSONValAsInt(initialCamera->array->GetByIndex(1)));
+
+					Camera.pos = InitialCameraPos;
+					GameCamFocus = Camera.pos;
+					GameCamera = Camera.pos;
 
 					json_value *cameraAreas = file->val->hash->GetByKey("CameraRestraints");
 					if (cameraAreas)
@@ -3516,8 +5269,18 @@ UPDATE_FUNCTION(LevelLoader)
 						json_data_file *prefab = (json_data_file *)GetFromHash(&PrefabData, obj->prefab);
 						assert(prefab);
 						obj->objectID = DeserializeObject(prefab->val);
-						auto tx = OTH(obj->objectID, transform);
-						tx->pos = obj->pos;
+						OTH(obj->objectID, transform)->pos = obj->pos;
+						OTH(obj->objectID, metadata)->flags |= GAME_OBJECT;
+
+						auto metadata = OTH(obj->objectID, metadata);
+						if (metadata->cmpInUse & SAVE_AND_LOAD)
+						{
+							json_value *serializedData = item->array->num_elements == 4 ? item->array->GetByIndex(3) : NULL;
+							auto saveandload = OTH(obj->objectID, save_and_load);
+							SaveOrLoad = LOAD;
+							LoadData = serializedData;
+							saveandload->in_out(obj->objectID);
+						}
 
 						item = item->next;
 					}
@@ -3559,6 +5322,7 @@ UPDATE_FUNCTION(LevelLoader)
 			curLevel++;
 			HashGetNext(&Levels, NULL, NULL, &value, iter);
 		}
+		HashEndIteration(iter); 
 	}
 }
 
@@ -3920,6 +5684,7 @@ UPDATE_FUNCTION(TilePlacerUpdate)
 enum camera_restraint_mode
 {
 	CM_NONE,
+	CM_SET_INITIAL_CAMERA,
 	CM_SET_AREA,
 	CM_ADD_AREA,
 	CM_EDIT_AREA,
@@ -3953,6 +5718,16 @@ void DrawCameraFocus(uint32_t color, ivec2 focusPoint)
 	DrawLine(color, color, ToScreen(focusPoint.x, focusPoint.y - (4 << 9)), ToScreen(focusPoint.x, focusPoint.y + (4 << 9)), 0x200, 1);
 }
 
+void DrawInitialCameraPos()
+{
+	SetShader("basic");
+	uint32_t color = MAKE_COLOR(200,100,40,255);
+	DrawCircle(color, ToScreen(InitialCameraPos), (6<<9));
+	DrawCircle(COL_BLACK, ToScreen(InitialCameraPos), (5<<9));
+	DrawLine(color, color, ToScreen(InitialCameraPos.x - (4 << 9), InitialCameraPos.y), ToScreen(InitialCameraPos.x + (4 << 9), InitialCameraPos.y), 0x200, 1);
+	DrawLine(color, color, ToScreen(InitialCameraPos.x, InitialCameraPos.y - (4 << 9)), ToScreen(InitialCameraPos.x, InitialCameraPos.y + (4 << 9)), 0x200, 1);
+}
+
 void DrawCameraRegion(float zoom)
 {
 	uint32_t x = GameCamFocus.x;
@@ -3974,7 +5749,8 @@ UPDATE_FUNCTION(CameraRestraintEditorDraw)
 	SetShader("basic_tex_color");
 	SetFontAsPercentageOfScreen("JackInput", 2.4f);
 	SetFontColor(MAKE_COLOR(255,100,0,255));
-	DrawTextGui(2, 10, "Controls");
+	DrawTextGui(2, 13, "Controls");
+	DrawTextGui(2, 10, "I to set initial camera");
 	DrawTextGui(2, 7, "S to draw region");
 	DrawTextGui(2, 4, "A to add region");
 	DrawTextGui(2, 1, "R to remove region (click one handle)");
@@ -3982,6 +5758,7 @@ UPDATE_FUNCTION(CameraRestraintEditorDraw)
 	switch (CameraRestraintMode)
 	{
 		case CM_NONE: DrawTextGui(40, 95, "Mode: Edit"); break;
+		case CM_SET_INITIAL_CAMERA: DrawTextGui(40, 95, "Mode: Set Initial Camera"); break;
 		case CM_SET_AREA: DrawTextGui(40, 95, "Mode: Set Area (will erase others)"); break;
 		case CM_ADD_AREA: DrawTextGui(40, 95, "Mode: Add Area"); break;
 		case CM_REMOVE_AREA: DrawTextGui(40, 95, "Mode: Remove Area"); break;
@@ -3995,12 +5772,133 @@ UPDATE_FUNCTION(CameraRestraintUpdateAndDraw)
 	local_persistent irect CurrentCameraRestraintArea;
 	local_persistent irect *EditingArea;
 	auto custom_flags = GO(custom_flags);
+	if (KeyboardReleases[KB_I])
+		CameraRestraintMode = CM_SET_INITIAL_CAMERA;
 	if (KeyboardReleases[KB_S])
 		CameraRestraintMode = CM_SET_AREA;
 	if (KeyboardReleases[KB_A])
 		CameraRestraintMode = CM_ADD_AREA;
 	if (KeyboardReleases[KB_R])
 		CameraRestraintMode = CM_REMOVE_AREA;
+
+
+	for (int i = 0; i < NumCameraRestraintAreas; i++)
+		DrawCameraRestraintArea(MAKE_COLOR(200,150,150,200), &CameraRestraintAreas[i]);
+
+	int tmp = NumCameraRestraintAreas;
+	NumCameraRestraintAreas = 0;
+	ivec2 playerFocus = PlayerFocus();
+	NumCameraRestraintAreas = tmp;
+
+	DrawCameraFocus(MAKE_COLOR(100,200,100,200), playerFocus);
+	DrawCameraFocus(MAKE_COLOR(200,100,100,200), GameCamFocus);
+
+	DrawInitialCameraPos();
+
+	DrawCameraRegion(2);
+
+	switch (CameraRestraintMode)
+	{
+		case CM_REMOVE_AREA:
+		case CM_NONE:
+		{
+		} break;
+		
+		case CM_SET_INITIAL_CAMERA:
+		{
+			if (MousePresses[0])
+			{
+				InitialCameraPos = FromScreen(MousePos);
+				CameraRestraintMode = CM_NONE;
+			}
+		} break;
+
+		case CM_SET_AREA:
+		{
+			if (MousePresses[0])
+			{
+				NumCameraRestraintAreas = 0;
+				AddingCameraRestraintArea = true;
+				CurrentCameraRestraintArea.BL = FromScreen(MousePos);
+			}
+
+			if (MouseDown[0])
+				CurrentCameraRestraintArea.UR = FromScreen(MousePos);
+
+			if (MouseReleases[0])
+			{
+				uint32_t minX = CurrentCameraRestraintArea.BL.x < CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
+				uint32_t minY = CurrentCameraRestraintArea.BL.y < CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
+				uint32_t maxX = CurrentCameraRestraintArea.BL.x > CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
+				uint32_t maxY = CurrentCameraRestraintArea.BL.y > CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
+				CameraRestraintAreas[0] = {{minX, minY},{maxX, maxY}};
+				NumCameraRestraintAreas = 1;
+				AddingCameraRestraintArea = false;
+				CameraRestraintMode = CM_NONE;
+			}
+
+			if (AddingCameraRestraintArea)
+				DrawCameraRestraintArea(COL_WHITE, &CurrentCameraRestraintArea);
+			else
+			{
+				SetShader("basic");
+				DrawCircle(COL_WHITE, {(float)MousePos.x, (float)MousePos.y}, (5 << 9));
+			}
+
+		} break;
+
+		case CM_ADD_AREA:
+		{
+			if (MousePresses[0])
+			{
+				AddingCameraRestraintArea = true;
+				CurrentCameraRestraintArea.BL = FromScreen(MousePos);
+			}
+
+			if (MouseDown[0])
+				CurrentCameraRestraintArea.UR = FromScreen(MousePos);
+
+			if (MouseReleases[0])
+			{
+				uint32_t minX = CurrentCameraRestraintArea.BL.x < CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
+				uint32_t minY = CurrentCameraRestraintArea.BL.y < CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
+				uint32_t maxX = CurrentCameraRestraintArea.BL.x > CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
+				uint32_t maxY = CurrentCameraRestraintArea.BL.y > CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
+				CameraRestraintAreas[NumCameraRestraintAreas++] = {{minX, minY},{maxX, maxY}};
+				CameraRestraintMode = CM_NONE;
+				AddingCameraRestraintArea = false;
+			}
+
+			if (AddingCameraRestraintArea)
+				DrawCameraRestraintArea(COL_WHITE, &CurrentCameraRestraintArea);
+			else
+			{
+				SetShader("basic");
+				DrawCircle(COL_WHITE, {MousePos.x, MousePos.y}, 5);
+			}
+
+		} break;
+
+		case CM_EDIT_AREA:
+		{
+			if (MouseDown[0])
+				EditingArea->UR = FromScreen(MousePos);
+
+			if (MouseReleases[0])
+			{
+				uint32_t minX = EditingArea->BL.x < EditingArea->UR.x ? EditingArea->BL.x : EditingArea->UR.x;
+				uint32_t minY = EditingArea->BL.y < EditingArea->UR.y ? EditingArea->BL.y : EditingArea->UR.y;
+				uint32_t maxX = EditingArea->BL.x > EditingArea->UR.x ? EditingArea->BL.x : EditingArea->UR.x;
+				uint32_t maxY = EditingArea->BL.y > EditingArea->UR.y ? EditingArea->BL.y : EditingArea->UR.y;
+				*EditingArea = {{minX, minY},{maxX, maxY}};
+				CameraRestraintMode = CM_NONE;
+				AddingCameraRestraintArea = false;
+			}
+
+			DrawCameraRestraintArea(COL_WHITE, EditingArea);
+		} break;
+	}
+
 
 	if (!AddingCameraRestraintArea)
 	{
@@ -4095,112 +5993,6 @@ UPDATE_FUNCTION(CameraRestraintUpdateAndDraw)
 		}
 	}
 
-	switch (CameraRestraintMode)
-	{
-		case CM_REMOVE_AREA:
-		case CM_NONE:
-		{
-		} break;
-
-		case CM_SET_AREA:
-		{
-			if (MousePresses[0])
-			{
-				NumCameraRestraintAreas = 0;
-				AddingCameraRestraintArea = true;
-				CurrentCameraRestraintArea.BL = FromScreen(MousePos);
-			}
-
-			if (MouseDown[0])
-				CurrentCameraRestraintArea.UR = FromScreen(MousePos);
-
-			if (MouseReleases[0])
-			{
-				uint32_t minX = CurrentCameraRestraintArea.BL.x < CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
-				uint32_t minY = CurrentCameraRestraintArea.BL.y < CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
-				uint32_t maxX = CurrentCameraRestraintArea.BL.x > CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
-				uint32_t maxY = CurrentCameraRestraintArea.BL.y > CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
-				CameraRestraintAreas[0] = {{minX, minY},{maxX, maxY}};
-				NumCameraRestraintAreas = 1;
-				AddingCameraRestraintArea = false;
-				CameraRestraintMode = CM_NONE;
-			}
-
-			if (AddingCameraRestraintArea)
-				DrawCameraRestraintArea(COL_WHITE, &CurrentCameraRestraintArea);
-			else
-			{
-				SetShader("basic");
-				DrawCircle(COL_WHITE, {(float)MousePos.x, (float)MousePos.y}, (5 << 9));
-			}
-
-		} break;
-
-		case CM_ADD_AREA:
-		{
-			if (MousePresses[0])
-			{
-				AddingCameraRestraintArea = true;
-				CurrentCameraRestraintArea.BL = FromScreen(MousePos);
-			}
-
-			if (MouseDown[0])
-				CurrentCameraRestraintArea.UR = FromScreen(MousePos);
-
-			if (MouseReleases[0])
-			{
-				uint32_t minX = CurrentCameraRestraintArea.BL.x < CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
-				uint32_t minY = CurrentCameraRestraintArea.BL.y < CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
-				uint32_t maxX = CurrentCameraRestraintArea.BL.x > CurrentCameraRestraintArea.UR.x ? CurrentCameraRestraintArea.BL.x : CurrentCameraRestraintArea.UR.x;
-				uint32_t maxY = CurrentCameraRestraintArea.BL.y > CurrentCameraRestraintArea.UR.y ? CurrentCameraRestraintArea.BL.y : CurrentCameraRestraintArea.UR.y;
-				CameraRestraintAreas[NumCameraRestraintAreas++] = {{minX, minY},{maxX, maxY}};
-				CameraRestraintMode = CM_NONE;
-				AddingCameraRestraintArea = false;
-			}
-
-			if (AddingCameraRestraintArea)
-				DrawCameraRestraintArea(COL_WHITE, &CurrentCameraRestraintArea);
-			else
-			{
-				SetShader("basic");
-				DrawCircle(COL_WHITE, {MousePos.x, MousePos.y}, 5);
-			}
-
-		} break;
-
-		case CM_EDIT_AREA:
-		{
-			if (MouseDown[0])
-				EditingArea->UR = FromScreen(MousePos);
-
-			if (MouseReleases[0])
-			{
-				uint32_t minX = EditingArea->BL.x < EditingArea->UR.x ? EditingArea->BL.x : EditingArea->UR.x;
-				uint32_t minY = EditingArea->BL.y < EditingArea->UR.y ? EditingArea->BL.y : EditingArea->UR.y;
-				uint32_t maxX = EditingArea->BL.x > EditingArea->UR.x ? EditingArea->BL.x : EditingArea->UR.x;
-				uint32_t maxY = EditingArea->BL.y > EditingArea->UR.y ? EditingArea->BL.y : EditingArea->UR.y;
-				*EditingArea = {{minX, minY},{maxX, maxY}};
-				CameraRestraintMode = CM_NONE;
-				AddingCameraRestraintArea = false;
-			}
-
-			DrawCameraRestraintArea(COL_WHITE, EditingArea);
-		} break;
-	}
-
-	for (int i = 0; i < NumCameraRestraintAreas; i++)
-		DrawCameraRestraintArea(MAKE_COLOR(200,150,150,200), &CameraRestraintAreas[i]);
-
-	int tmp = NumCameraRestraintAreas;
-	NumCameraRestraintAreas = 0;
-	ivec2 playerFocus = PlayerFocus();
-	NumCameraRestraintAreas = tmp;
-
-	DrawCameraFocus(MAKE_COLOR(100,200,100,200), playerFocus);
-	DrawCameraFocus(MAKE_COLOR(200,100,100,200), GameCamFocus);
-
-	DrawCameraRegion(2);
-
 }
 
 
@@ -4231,7 +6023,7 @@ UPDATE_FUNCTION(PrefabPlacer)
 	if (MousePresses[0])
 	{
 		level_objects *obj = &LevelObjects[NumLevelObjects++];
-		obj->prefab = SelectedPrefab->file->basename;
+		obj->prefab = SelectedPrefab->baseName;
 		obj->pos = tx->pos;
 		obj->objectID = PlacedPrefabID;
 
@@ -4302,7 +6094,9 @@ UPDATE_FUNCTION(PrefabSelect)
 			while (value)
 			{
 				dir_file *file = (dir_file *)value;
-				strcpy(PrefabNames[NumPrefabs++], file->basename);
+				if (strcmp(file->ext, "json") == 0)
+					strcpy(PrefabNames[NumPrefabs++], file->basename);
+
 				HashGetNext(&prefabs->files, NULL, NULL, &value, iter);
 			}
 			HashEndIteration(iter);
@@ -4433,7 +6227,15 @@ UPDATE_FUNCTION(PrefabMover)
 		obj->pos.x &= ~0x1ff;
 		obj->pos.y &= ~0x1ff;
 		auto tx = OTH(obj->objectID, transform);
+		ivec2 oldPos = tx->pos;
 		tx->pos = obj->pos;
+		ivec2 delta = tx->pos - oldPos;
+		if (OTH(obj->objectID, metadata)->cmpInUse & WAYPOINTS)
+		{
+			auto waypoints = OTH(obj->objectID, waypoints);
+			for (int i = 0; i < waypoints->count; i++)
+				waypoints->points[i] += delta;
+		}
 	}
 
 	SetShader("basic");
@@ -4519,6 +6321,234 @@ UPDATE_FUNCTION(PrefabMover)
 	}
 }
 
+global_variable char StringStorage[512];
+global_variable int EditingStringForObject = -1;
+
+UPDATE_FUNCTION(EditObjectsEditorDraw)
+{
+	if (EditingStringForObject > -1)
+	{
+		SetShader("basic_tex_color");
+		SetFontAsPercentageOfScreen("JackInput", 2.4f);
+		SetFontColor(MAKE_COLOR(255,100,0,255));
+		DrawTextGui(2, 13, "String:");
+		DrawTextGui(8, 13, StringStorage);
+	}
+}
+
+UPDATE_FUNCTION(EditObjectsDraw)
+{
+	local_persistent int EditingObject = -1;
+	local_persistent int EditingWaypoint = -1;
+
+	if (!MouseDown[0])
+	{
+		if (EditingObject != -1)
+		{
+			int x = 0;
+		}
+		EditingObject = -1;
+		EditingWaypoint = -1;
+	}
+
+	SetShader("basic");
+	uint32_t baseColor = MAKE_COLOR(200,0,0,255);
+	uint32_t highlightColor = MAKE_COLOR(200,100,40,255);
+	uint32_t endOfChainColor = MAKE_COLOR(0,200,0,255);
+	uint32_t addingColor = MAKE_COLOR(200,0,200,255);
+	uint32_t addingSymbolColor = MAKE_COLOR(200,200,200,255);
+	
+	ivec2 gamePosInPixels = FromScreen(MousePos);
+	gamePosInPixels.x >>= 9;
+	gamePosInPixels.y >>= 9;
+
+	if (EditingObject > -1 && EditingWaypoint > -1)
+	{
+		level_objects *obj = &LevelObjects[EditingObject];
+		ivec2 *point = &OTH(obj->objectID, waypoints)->points[EditingWaypoint];
+		*point = ivec2(gamePosInPixels.x << 9, gamePosInPixels.y << 9);
+	}
+
+	if (EditingStringForObject > -1)
+	{
+		level_objects *obj = &LevelObjects[EditingStringForObject];
+		auto str = OTH(obj->objectID, string_storage);
+		if (KeyboardDown[KB_ESCAPE] || KeyboardDown[KB_ENTER])
+		{
+			EditingStringForObject = -1;
+			str->string = PUSH_ARRAY(&Arena, char, strlen(StringStorage) + 1);
+			strcpy(str->string, StringStorage);
+		}
+
+		int len = strlen(StringStorage);
+		for (int i = KB_A; i <= KB_Z; i++)
+		{
+			if (KeyboardPresses[i])
+			{
+				if (KeyboardDown[KB_L_SHIFT] || KeyboardDown[KB_R_SHIFT])
+				{
+					StringStorage[len] = 'A' + (i - KB_A);
+					StringStorage[++len] = '\0';
+				}
+				else
+				{
+					StringStorage[len] = 'a' + (i - KB_A);
+					StringStorage[++len] = '\0';
+				}
+			}
+		}
+		for (int i = KB_0; i <= KB_9; i++)
+		{
+			if (KeyboardPresses[i])
+			{
+				const char *numberKeySymbols = ")!@#$%^&*(";
+				if (KeyboardDown[KB_L_SHIFT] || KeyboardDown[KB_R_SHIFT])
+					StringStorage[len] = numberKeySymbols[i - KB_0];
+				else
+					StringStorage[len] = '0' + (i - KB_0);
+
+				StringStorage[++len] = '\0';
+			}
+		}
+		if (KeyboardPresses[KB_PERIOD])
+		{
+			StringStorage[len] = '.';
+			StringStorage[++len] = '\0';
+		}
+		if (KeyboardPresses[KB_COMMA])
+		{
+			StringStorage[len] = ',';
+			StringStorage[++len] = '\0';
+		}
+		if (KeyboardPresses[KB_COMMA])
+		{
+			StringStorage[len] = ',';
+			StringStorage[++len] = '\0';
+		}
+		if (KeyboardPresses[KB_SPACE])
+		{
+			StringStorage[len] = ' ';
+			StringStorage[++len] = '\0';
+		}
+
+		if (KeyboardPresses[KB_DELETE])
+		{
+			StringStorage[len-1] = '\0';
+		}
+	}
+
+	for (int i = 0; i < NumLevelObjects; i++)
+	{
+		level_objects *obj = &LevelObjects[i];
+		auto metadata = OTH(obj->objectID, metadata);
+		auto tx = OTH(obj->objectID, transform);
+		if (metadata->cmpInUse & STRING_STORAGE)
+		{
+			auto str = OTH(obj->objectID, string_storage);
+			int x = tx->pos.x & ~0x1ff;
+			int y = tx->pos.y & ~0x1ff;
+
+			int xInPixels = x >> 9;
+			int yInPixels = y >> 9;
+
+			DrawCircle(baseColor, ToScreen(x, y), 2<<9);
+
+			if (LengthSq(ivec2(xInPixels,yInPixels) - gamePosInPixels) < 25)
+			{
+				DrawCircle(endOfChainColor, ToScreen(x, y), (2<<9));
+				if (MousePresses[0])
+				{
+					if (str->string)
+						strcpy(StringStorage, str->string);
+					EditingStringForObject = i;
+				}
+			}
+		}
+
+		if (metadata->cmpInUse & WAYPOINTS)
+		{
+			auto waypoints = OTH(obj->objectID, waypoints);
+
+			ivec2 positions[4];
+			positions[0] = tx->pos;
+			positions[1] = waypoints->points[0];
+			positions[2] = waypoints->points[1];
+			positions[3] = waypoints->points[2];
+
+			for (int j = 0; j < waypoints->count + 1; j++)
+			{
+				//don't show the control for the body of the object if we already have a waypoint
+				if (waypoints->count > 0 && j == 0)
+					continue;
+
+				ivec2 wpPos = positions[j];
+
+				//Draw the control
+				int x = wpPos.x & ~0x1ff;
+				int y = wpPos.y & ~0x1ff;
+
+				int xInPixels = x >> 9;
+				int yInPixels = y >> 9;
+
+				DrawCircle(baseColor, ToScreen(x, y), 2<<9);
+
+				//if this is the last in the chain, we can add to it
+				bool canAdd = false;
+				if (j == waypoints->count && waypoints->count < 3)
+				{
+					canAdd = true;
+					DrawCircle(endOfChainColor, ToScreen(x, y), (2<<9));
+					if (KeyboardDown[KB_A])
+					{
+						DrawCircle(addingColor, ToScreen(x, y), (2<<9));
+						DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(x - (3<<9), y), ToScreen(x + (3<<9), y), 0x100);
+						DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(x, y + (3<<9)), ToScreen(x, y - (3<<9)), 0x100);
+					}
+				}
+
+				if (LengthSq(ivec2(xInPixels,yInPixels) - gamePosInPixels) < 25)
+				{
+					DrawCircle(highlightColor, ToScreen(x, y), (2<<9));
+					if (KeyboardDown[KB_A] && MousePresses[0] && canAdd)
+					{
+						EditingObject = i;
+						EditingWaypoint = waypoints->count++;
+						break;
+					}
+					else if (MousePresses[0] && j > 0 && KeyboardDown[KB_D])
+					{
+						for (int k = j-1; k < waypoints->count-1; k++)
+						{
+							waypoints->points[k] = waypoints->points[k+1];
+						}
+						waypoints->count--;
+						break;
+					}
+					else if (MousePresses[0] && j > 0)
+					{
+						EditingObject = i;
+						EditingWaypoint = j-1;
+						break;
+					}
+
+					if (j > 0 && KeyboardDown[KB_D])
+					{
+						DrawCircle(baseColor, ToScreen(x, y), (2<<9));
+						DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(x - (3<<9), y + (3<<9)), ToScreen(x + (3<<9), y - (3<<9)), 0x100);
+						DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(x + (3<<9), y + (3<<9)), ToScreen(x - (3<<9), y - (3<<9)), 0x100);
+					}
+				}
+			}
+			if (waypoints->count > 0)
+				DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(tx->pos), ToScreen(waypoints->points[0]), 0x100);
+
+			for (int j = 0; j < waypoints->count - 1; j++)
+				DrawLine(addingSymbolColor, addingSymbolColor, ToScreen(waypoints->points[j]), ToScreen(waypoints->points[j+1]), 0x100);
+		}
+	}
+
+}
+
 
 UPDATE_FUNCTION(ModeSelectorEditorDraw)
 {
@@ -4534,10 +6564,12 @@ UPDATE_FUNCTION(ModeSelectorEditorDraw)
 		DrawTextGui(2, 82, "Shift+M '%s'", editor_mode_names[4]);
 		DrawTextGui(2, 79, "Shift+R '%s'", editor_mode_names[5]);
 		DrawTextGui(2, 76, "Shift+L '%s'", editor_mode_names[6]);
+		DrawTextGui(2, 73, "Shift+O '%s'", editor_mode_names[7]);
+		DrawTextGui(2, 70, "Shift+D '%s'", editor_mode_names[8]);
 	}
 	else
 	{
-		DrawTextGui(40, 97, "ESC to exit '%s'", editor_mode_names[EditorMode]);
+		DrawTextGui(40, 97.5f, "ESC to exit '%s'", editor_mode_names[EditorMode]);
 	}
 }
 
@@ -4547,15 +6579,13 @@ UPDATE_FUNCTION(ModeSelector)
 	{
 		ExitEditorMode();
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_T] && EditorMode != TILE_PLACE)
+	else if (ShiftHeld && KeyboardPresses[KB_T] && EditorMode == NONE)
 	{
 		ExitEditorMode();
 		FocusFunction = FreelyMoveableFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = TILE_PLACE;
 		TilePlaceID = AddObject(OBJ_TILE_PLACER);
-		sprintf(DebugMessage, "Tile place mode");
-		DebugMessageCounter = 120;
 		auto meta = OTH(TilePlaceID, metadata);
 		auto update = OTH(TilePlaceID, update);
 		auto draw = OTH(TilePlaceID, special_draw);
@@ -4566,15 +6596,12 @@ UPDATE_FUNCTION(ModeSelector)
 		draw->depth = 30;
 		editor_draw->draw = TilePlacerEditorDraw;
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_C] && EditorMode != CAMERA_RESTRAINT)
+	else if (ShiftHeld && KeyboardPresses[KB_C] && EditorMode == NONE)
 	{
 		ExitEditorMode();
 		FocusFunction = FreelyMoveableFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = CAMERA_RESTRAINT;
-
-		sprintf(DebugMessage, "Set camera restraints");
-		DebugMessageCounter = 120;
 
 		Camera.width *= 2;
 		Camera.height *= 2;
@@ -4588,29 +6615,25 @@ UPDATE_FUNCTION(ModeSelector)
 		special_draw->depth = 30;
 		editor_gui->draw = CameraRestraintEditorDraw;
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_P] && EditorMode != DISPLAY_PREFAB_MENU)
+	else if (ShiftHeld && KeyboardPresses[KB_P] && EditorMode == NONE)
 	{
 		ExitEditorMode();
 		FocusFunction = PlayerFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = DISPLAY_PREFAB_MENU;
 		PrefabSelectID = AddObject(OBJ_PREFAB_SELECTOR);
-		sprintf(DebugMessage, "Select prefab");
-		DebugMessageCounter = 120;
 		auto meta = OTH(PrefabSelectID, metadata);
 		auto draw = OTH(PrefabSelectID, draw_editor_gui);
 		meta->cmpInUse = DRAW_EDITOR_GUI;
 		draw->draw = PrefabSelect;
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_M] && EditorMode != MOVE_PREFABS)
+	else if (ShiftHeld && KeyboardPresses[KB_M] && EditorMode == NONE)
 	{
 		ExitEditorMode();
 		FocusFunction = FreelyMoveableFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = MOVE_PREFABS;
 		MovePrefabID = AddObject(OBJ_PREFAB_MOVER);
-		sprintf(DebugMessage, "Move/delete prefabs");
-		DebugMessageCounter = 120;
 		auto meta = OTH(MovePrefabID, metadata);
 		auto draw = OTH(MovePrefabID, special_draw);
 		auto editor_draw = OTH(MovePrefabID, draw_editor_gui);
@@ -4619,29 +6642,53 @@ UPDATE_FUNCTION(ModeSelector)
 		draw->depth = 200;
 		editor_draw->draw = PrefabMoverEditorDraw;
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_R] && EditorMode != RUNNING_GAME)
+	else if (ShiftHeld && KeyboardPresses[KB_R] && EditorMode == NONE)
 	{
+		SerializeLevel(&SavedLevel, LevelName);
 		ExitEditorMode();
 		FocusFunction = PlayerFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = RUNNING_GAME;
-		sprintf(DebugMessage, "Running game");
-		DebugMessageCounter = 120;
 		SendingGameUpdateEvents = true;
 	}
-	else if (ShiftHeld && KeyboardPresses[KB_L] && EditorMode != SELECTING_LEVEL)
+	else if (ShiftHeld && KeyboardPresses[KB_L] && EditorMode == NONE)
 	{
 		ExitEditorMode();
 		FocusFunction = PlayerFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = SELECTING_LEVEL;
 		LevelSelectID = AddObject(OBJ_LEVEL_SELECTOR);
-		sprintf(DebugMessage, "Selecting level");
-		DebugMessageCounter = 120;
 		auto meta = OTH(LevelSelectID, metadata);
 		auto draw = OTH(LevelSelectID, draw_editor_gui);
 		meta->cmpInUse = DRAW_EDITOR_GUI;
 		draw->draw = LevelSelect;
+	}
+	else if (ShiftHeld && KeyboardPresses[KB_O] && EditorMode == NONE)
+	{
+		ExitEditorMode();
+		FocusFunction = FreelyMoveableFocus;
+		CameraUpdateFunction = CameraLerpFunction;
+		EditorMode = EDIT_OBJECTS;
+		EditObjectID = AddObject(OBJ_EDIT_OBJECTS);
+		auto meta = OTH(EditObjectID, metadata);
+		auto draw = OTH(EditObjectID, special_draw);
+		auto editor_draw = OTH(EditObjectID, draw_editor_gui);
+		meta->cmpInUse = SPECIAL_DRAW | DRAW_EDITOR_GUI;
+		draw->draw = EditObjectsDraw;
+		draw->depth = 200;
+		editor_draw->draw = EditObjectsEditorDraw;
+	}
+	else if (ShiftHeld && KeyboardPresses[KB_D] && EditorMode == NONE)
+	{
+		ExitEditorMode();
+		FocusFunction = PlayerFocus;
+		CameraUpdateFunction = CameraLerpFunction;
+		EditorMode = DEBUG_FUNCTIONS;
+		DebugFunctionsID = AddObject(OBJ_DEBUG_FUNCTIONS);
+		auto meta = OTH(DebugFunctionsID, metadata);
+		auto draw = OTH(DebugFunctionsID, draw_editor_gui);
+		meta->cmpInUse = DRAW_EDITOR_GUI;
+		draw->draw = DebugFunctionsUpdateAndDraw;
 	}
 }
 
@@ -4652,4 +6699,10 @@ void InitGameFunctions()
 	ADD_GAME_FUNCTION(PlayerDraw);
 	ADD_GAME_FUNCTION(PlayerUpdate);
 	ADD_GAME_FUNCTION(PlatformUpdate);
+	ADD_GAME_FUNCTION(StandinUpdate);
+	ADD_GAME_FUNCTION(JumperUpdate);
+	ADD_GAME_FUNCTION(SwooperUpdate);
+	ADD_GAME_FUNCTION(SwooperSaveAndLoad);
+	ADD_GAME_FUNCTION(DoorSaveAndLoad);
 }
+

@@ -109,23 +109,21 @@ void SetupGameData()
 	InitHash(&Levels, 64);
 	InitUIDMap(&QueuedSounds, 100, true, sizeof(queued_sound));
 
+	/*
 	ShaderFolder = LoadDirectory(App.baseFolder, "shaders");
 	ReadInShadersFromDirectory(&ShaderFolder);
 	WatchDirectory(&ShaderFolder, ShaderDirCallback);
 
-	ColliderDescriptionsFolder = LoadDirectory(App.baseFolder, "collider_descriptions");
-	ReadInJsonDataFromDirectory(&ColliderDescriptionsFolder, &ColliderDescriptions);
+	FontFolder = LoadDirectory(App.baseFolder, "fonts");
+	ReadInFontsFromDirectory(&FontFolder);
+
+	dir_folder tileTextureFolder = LoadDirectory(App.baseFolder, "tile_textures");
+	ReadInTileTexturesFromDirectory(&tileTextureFolder);
 
 	TextureFolder = LoadDirectory(App.baseFolder, "textures");
 	ReadInTexturesFromDirectory(&TextureFolder);
 	WatchDirectory(&TextureFolder, TextureDirCallback);
 
-	SoundFolder = LoadDirectory(App.baseFolder, "sounds");
-	ReadInSoundsFromDirectory(&SoundFolder);
-	WatchDirectory(&SoundFolder, SoundDirCallback);
-
-	FontFolder = LoadDirectory(App.baseFolder, "fonts");
-	ReadInFontsFromDirectory(&FontFolder);
 
 	ComponentFolder = LoadDirectory(App.baseFolder, "components");
 	ReadInJsonDataFromDirectory(&ComponentFolder, &ComponentData);
@@ -138,6 +136,30 @@ void SetupGameData()
 
 	PrefabFolder = LoadDirectory(App.baseFolder, "prefabs");
 	ReadInJsonDataFromDirectory(&PrefabFolder, &PrefabData);
+
+	//UNUSED??
+	//ColliderDescriptionsFolder = LoadDirectory(App.baseFolder, "collider_descriptions");
+	//ReadInJsonDataFromDirectory(&ColliderDescriptionsFolder, &ColliderDescriptions);
+
+	*/
+
+	LevelFolder = LoadDirectory(App.baseFolder, "levels");
+	ReadInJsonDataFromDirectory(&LevelFolder, &Levels);
+
+	void *datapak = ReadBinaryFile("binarydata.dat", NULL);
+	ReadInShadersFromDirectory(datapak);
+	ReadInFontsFromDirectory(datapak);
+	ReadInTileTexturesFromDirectory(datapak);
+	ReadInTexturesFromDirectory(datapak);
+	ReadInJsonDataFromDirectory(datapak, "components", &ComponentData);
+	ReadInJsonDataFromDirectory(datapak, "basic_animations", &BasicAnimations);
+	//ReadInJsonDataFromDirectory(datapak, "levels", &Levels);
+	ReadInJsonDataFromDirectory(datapak, "prefabs", &PrefabData);
+
+
+	SoundFolder = LoadDirectory(App.baseFolder, "sounds");
+	ReadInSoundsFromDirectory(&SoundFolder);
+	WatchDirectory(&SoundFolder, SoundDirCallback);
 }
 
 void SetupGameInput()

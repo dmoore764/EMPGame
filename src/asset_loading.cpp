@@ -236,6 +236,55 @@ void ParseShaderConfig(shader *s, token *config)
 		s->vertex_stride += s->attributes[i].single_unit_size * s->attributes[i].number_of_units;
 }
 
+void ReadInShadersFromDirectory(void *datapak)
+{
+	table_of_contents *toc = (table_of_contents *)datapak;
+	for (int i = 0; i < toc->numRecords; i++)
+	{
+		file_record *fr = &toc->records[i];
+		if (strcmp(fr->folderName, "shaders") == 0)
+		{
+			if (strcmp(fr->fileName + strlen(fr->fileName) - 4, "vert") == 0)
+			{
+				char basename[64];
+				sprintf(basename, "%.*s", strlen(fr->fileName) - 5, fr->fileName);
+
+				shader *s = (shader *)GetFromHash(&Shaders, basename);
+				if (s == NULL)
+				{
+					s = PUSH_ITEM(&Arena, shader);
+					strcpy(s->name, basename);
+
+					AddToHash(&Shaders, s, basename);
+				}
+
+				char src_file[KILOBYTES(1)];
+
+				//parse the config file for this shader
+				sprintf(src_file, "%s.txt", basename);
+				file_record *configFile = GetFileRecordWithName(toc, src_file);
+
+				char *config_src = GetFileFromRecordsAsString(datapak, configFile);
+				if (config_src)
+				{
+					transient_arena transient = GetTransientArena(&Arena);
+					token *config_tokens = Tokenize(config_src, src_file, &Arena);
+					ParseShaderConfig(s, config_tokens);
+					FreeTransientArena(transient);
+
+					char *basic_vertsrc = GetFileFromRecordsAsString(datapak, fr);
+					sprintf(src_file, "%s.frag", basename);
+					file_record *fragsrc = GetFileRecordWithName(toc, src_file);
+					char *basic_fragsrc = GetFileFromRecordsAsString(datapak, fragsrc);
+					CompileProgram(s, basename, basic_vertsrc, basic_fragsrc);
+					free(basic_vertsrc);
+					free(basic_fragsrc);
+				}
+			}
+		}
+	}
+}
+
 void ReadInShadersFromDirectory(dir_folder *shader_folder)
 {
 	for (int i = 0; i < shader_folder->files.table_size; i++)
@@ -296,12 +345,11 @@ void ShaderDirCallback(dir_folder *folder, char *filename)
 	RecompileShaders = true;
 }
 
-void ParseSpriteInfo(char *src_file)
+void ParseSpriteInfo(char *config_src)
 {
-	char *config_src = ReadFileIntoString(src_file);
 	assert(config_src);
 
-	token *config_tokens = Tokenize(config_src, src_file, &Arena);
+	token *config_tokens = Tokenize(config_src, "sprite descriptions", &Arena);
 	json_value *sprVal = ParseJSONValue(&config_tokens);
 
 	if (sprVal->type != JSON_ARRAY)
@@ -457,6 +505,114 @@ void ParseSpriteInfo(char *src_file)
 
 }
 
+void ReadInTileTexturesFromDirectory(void *datapak)
+{
+	table_of_contents *toc = (table_of_contents *)datapak;
+
+	for (int i = 0; i < toc->numRecords; i++)
+	{
+		file_record *fr = &toc->records[i];
+		if (strcmp(fr->folderName, "tile_textures") == 0)
+		{
+			char basename[64];
+			sprintf(basename, "%.*s", strlen(fr->fileName) - 4, fr->fileName);
+			char ext[4];
+			sprintf(ext, "%s", fr->fileName + strlen(fr->fileName) - 3);
+
+			if (strcmp(ext, "png") == 0)
+			{
+				game_tile_sprites *t = (game_tile_sprites *)GetFromHash(&TileSprites, basename);
+				if (t == NULL)
+				{
+					size_t fileLength;
+					void *fileData = GetBinaryFileFromRecords(datapak, fr, &fileLength);
+					t = AddTileSpritesToAvailableAtlas(&SpritePack, basename, fileData, fileLength, true);
+				}
+			}
+		}
+	}
+}
+
+void ReadInTileTexturesFromDirectory(dir_folder *tile_texture_folder)
+{
+	void *value;
+	size_t iter = HashGetFirst(&tile_texture_folder->files, NULL, NULL, &value);
+	while (value)
+	{
+		dir_file *file = (dir_file *)value;
+
+		if (strcmp(file->ext, "png") == 0)
+		{
+			game_tile_sprites *t = (game_tile_sprites *)GetFromHash(&TileSprites, file->basename);
+			bool loadtex = (t == NULL) || file->modified;
+			file->modified = false;
+			if (loadtex)
+			{
+				char src_file[KILOBYTES(1)];
+				sprintf(src_file, "%s%s", file->folder_path, file->name);
+				size_t fileLength;
+				void *fileData = ReadBinaryFile(src_file, &fileLength);
+				t = AddTileSpritesToAvailableAtlas(&SpritePack, file->basename, fileData, fileLength, true);
+				free(fileData);
+			}
+		}
+		HashGetNext(&tile_texture_folder->files, NULL, NULL, &value, iter);
+	}
+	HashEndIteration(iter);
+}
+
+
+
+void ReadInTexturesFromDirectory(void *datapak)
+{
+	table_of_contents *toc = (table_of_contents *)datapak;
+
+	for (int i = 0; i < toc->numRecords; i++)
+	{
+		file_record *fr = &toc->records[i];
+		if (strcmp(fr->folderName, "textures") == 0)
+		{
+			char basename[64];
+			sprintf(basename, "%.*s", strlen(fr->fileName) - 4, fr->fileName);
+			char ext[4];
+			sprintf(ext, "%s", fr->fileName + strlen(fr->fileName) - 3);
+
+			if (strcmp(ext, "png") == 0)
+			{
+				game_sprite *s = (game_sprite *)GetFromHash(&Sprites, basename);
+
+				if (s == NULL)
+				{
+					size_t fileLength;
+					void *fileData = GetBinaryFileFromRecords(datapak, fr, &fileLength);
+					s = AddSpriteToAvailableAtlas(&SpritePack, basename, fileData, fileLength, true);
+					s->origin = {};
+					s->numColliders = 0;
+				}
+			}
+		}
+	}
+
+	for (int i = 0; i < toc->numRecords; i++)
+	{
+		file_record *fr = &toc->records[i];
+		if (strcmp(fr->folderName, "textures") == 0)
+		{
+			char basename[64];
+			sprintf(basename, "%.*s", strlen(fr->fileName) - 5, fr->fileName);
+			char ext[5];
+			sprintf(ext, "%s", fr->fileName + strlen(fr->fileName) - 4);
+
+			if (strcmp(ext, "json") == 0)
+			{
+				char *config_src = GetFileFromRecordsAsString(datapak, fr);
+				ParseSpriteInfo(config_src);
+			}
+		}
+	}
+}
+
+
 void ReadInTexturesFromDirectory(dir_folder *texture_folder)
 {
 	void *value;
@@ -476,31 +632,23 @@ void ReadInTexturesFromDirectory(dir_folder *texture_folder)
 
 		if (strcmp(file->ext, "png") == 0)
 		{
-			if (strstr(file->folder_path,"Tiles"))
-			{
-				game_tile_sprites *t = (game_tile_sprites *)GetFromHash(&TileSprites, file->basename);
-				bool loadtex = (t == NULL) || file->modified;
-				file->modified = false;
-				if (loadtex)
-				{
-					t = AddTileSpritesToAvailableAtlas(&SpritePack, file, true);
-				}
-			}
-			else
-			{
-				//texture *t = (texture *)GetFromHash(&Textures, file->basename);
-				game_sprite *s = (game_sprite *)GetFromHash(&Sprites, file->basename);
+			//texture *t = (texture *)GetFromHash(&Textures, file->basename);
+			game_sprite *s = (game_sprite *)GetFromHash(&Sprites, file->basename);
 
-				//determine whether we actually need to load the file
-				bool loadtex = ((s == NULL) || file->modified);
-				file->modified = false;
+			//determine whether we actually need to load the file
+			bool loadtex = ((s == NULL) || file->modified);
+			file->modified = false;
 
-				if (loadtex)
-				{
-					s = AddSpriteToAvailableAtlas(&SpritePack, file, true);
-					s->origin = {};
-					s->numColliders = 0;
-				}
+			if (loadtex)
+			{
+				char src_file[KILOBYTES(1)];
+				sprintf(src_file, "%s%s", file->folder_path, file->name);
+				size_t fileLength;
+				void *fileData = ReadBinaryFile(src_file, &fileLength);
+				s = AddSpriteToAvailableAtlas(&SpritePack, file->basename, fileData, fileLength, true);
+				free(fileData);
+				s->origin = {};
+				s->numColliders = 0;
 			}
 		}
 		HashGetNext(&texture_folder->files, NULL, NULL, &value, iter);
@@ -518,7 +666,8 @@ void ReadInTexturesFromDirectory(dir_folder *texture_folder)
 		{
 			char src_file[KILOBYTES(1)];
 			sprintf(src_file, "%s%s", file->folder_path, file->name);
-			ParseSpriteInfo(src_file);
+			char *config_src = ReadFileIntoString(src_file);
+			ParseSpriteInfo(config_src);
 		}
 		HashGetNext(&texture_folder->files, NULL, NULL, &value, iter);
 	}
@@ -537,6 +686,32 @@ void TextureDirCallback(dir_folder *folder, char *filename)
 	ReloadTextures = true;
 }
 
+
+void ReadInFontsFromDirectory(void *datapak)
+{
+	table_of_contents *toc = (table_of_contents *)datapak;
+	for (int i = 0; i < toc->numRecords; i++)
+	{
+		file_record *fr = &toc->records[i];
+		if (strcmp(fr->folderName, "fonts") == 0)
+		{
+			char basename[64];
+			sprintf(basename, "%.*s", strlen(fr->fileName) - 4, fr->fileName);
+			char ext[4];
+			sprintf(ext, "%s", fr->fileName + strlen(fr->fileName) - 3);
+			if (strcmp(ext, "ttf") == 0 || strcmp(ext, "otf") == 0)
+			{
+
+				font *newfont = PUSH_ITEM(&Arena, font);
+
+				size_t fileLength;
+				void *fileData = GetBinaryFileFromRecords(datapak, fr, &fileLength);
+				InitFont(newfont, basename, fileData, fileLength);
+				AddToHash(&Fonts, newfont, basename);
+			}
+		}
+	}
+}
 
 void ReadInFontsFromDirectory(dir_folder *folder)
 {
@@ -562,7 +737,13 @@ void ReadInFontsFromDirectory(dir_folder *folder)
 			{
 
 				font *newfont = PUSH_ITEM(&Arena, font);
-				InitFont(newfont, file->basename, file->folder_path, file->name);
+
+				char src_file[KILOBYTES(1)];
+				sprintf(src_file, "%s%s", file->folder_path, file->name);
+				size_t fileLength;
+				void *fileData = ReadBinaryFile(src_file, &fileLength);
+
+				InitFont(newfont, file->basename, fileData, fileLength);
 
 				if (strstr(file->folder_path, "japanese_fonts") != NULL)
 					newfont->language = font::JAPANESE;

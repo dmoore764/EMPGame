@@ -85,6 +85,8 @@ typedef GENERIC_CALLBACK(generic_callback);
 #include "game_sound.h"
 #include "message_queue.h"
 
+#include "file_record.h"
+
 
 struct application
 {

@@ -23,25 +23,23 @@ void AddAtlasToSpritePack(sprite_pack *pack)
 	atlas->tex = newtex;
 }
 
-game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, dir_file *file, bool render_immediately)
+game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, char *fileName, void *fileData, size_t fileLength, bool render_immediately)
 {
 	if (pack->num_atlases == 0)
 	{
 		AddAtlasToSpritePack(pack);
 	}
 
-	game_sprite *s = (game_sprite *)GetFromHash(&Sprites, file->basename);
+	game_sprite *s = (game_sprite *)GetFromHash(&Sprites, fileName);
 	if (s == NULL)
 	{
 		s = PUSH_ITEM(&Arena, game_sprite);
-		AddToHash(&Sprites, s, file->basename);
+		AddToHash(&Sprites, s, fileName);
 	}
 
 
-	char src_file[KILOBYTES(1)];
-	sprintf(src_file, "%s%s", file->folder_path, file->name);
 	int n, w, h;
-	uint8_t *image_data = stbi_load(src_file, &w, &h, &n, 0);
+	uint8_t *image_data = stbi_load_from_memory((const stbi_uc *)fileData, fileLength, &w, &h, &n, 0);
 
 	sub_rectangle *rect = AddToAtlas(&pack->atlas[pack->current_atlas].atlas, s, w, h);
 	if (!rect)
@@ -77,8 +75,6 @@ game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, dir_file *file, bool r
 		}
 	}
 
-	stbi_image_free(image_data);
-
 	if (render_immediately)
 	{
 		glBindTexture(GL_TEXTURE_2D, atlas->tex->gl_id);
@@ -89,25 +85,23 @@ game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, dir_file *file, bool r
 }
 
 
-game_tile_sprites *AddTileSpritesToAvailableAtlas(sprite_pack *pack, dir_file *file, bool render_immediately)
+game_tile_sprites *AddTileSpritesToAvailableAtlas(sprite_pack *pack, char *fileName, void *fileData, size_t fileLength, bool render_immediately)
 {
 	if (pack->num_atlases == 0)
 	{
 		AddAtlasToSpritePack(pack);
 	}
 
-	game_tile_sprites *s = (game_tile_sprites *)GetFromHash(&TileSprites, file->basename);
+	game_tile_sprites *s = (game_tile_sprites *)GetFromHash(&TileSprites, fileName);
 	if (s == NULL)
 	{
 		s = PUSH_ITEM(&Arena, game_tile_sprites);
 		s->numTiles = 0;
-		AddToHash(&TileSprites, s, file->basename);
+		AddToHash(&TileSprites, s, fileName);
 	}
 
-	char src_file[KILOBYTES(1)];
-	sprintf(src_file, "%s%s", file->folder_path, file->name);
 	int n, w, h;
-	uint8_t *image_data = stbi_load(src_file, &w, &h, &n, 0);
+	uint8_t *image_data = stbi_load_from_memory((const stbi_uc *)fileData, fileLength, &w, &h, &n, 0);
 	s->atlas_index = pack->current_atlas;
 	sprite_atlas *atlas = &pack->atlas[pack->current_atlas];
 
@@ -149,8 +143,6 @@ game_tile_sprites *AddTileSpritesToAvailableAtlas(sprite_pack *pack, dir_file *f
 			}
 		}
 	}
-
-	stbi_image_free(image_data);
 
 	if (render_immediately)
 	{

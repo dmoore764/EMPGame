@@ -75,6 +75,8 @@ void SerializeLevel(bool *savedLevel, char *levelName)
 	{
 		FW("{");
 
+		FW("    InitialCamera: [ %d, %d ],", InitialCameraPos.x, InitialCameraPos.y);
+
 		FW("    CameraRestraints: [");
 		for (int i = 0; i < NumCameraRestraintAreas; i++)
 		{
@@ -87,7 +89,18 @@ void SerializeLevel(bool *savedLevel, char *levelName)
 
 		for (int i = 0; i < NumLevelObjects; i++)
 		{
-			FW("        [ \"%s\", %d, %d ],", LevelObjects[i].prefab, LevelObjects[i].pos.x, LevelObjects[i].pos.y);
+			if (OTH(LevelObjects[i].objectID, metadata)->cmpInUse & SAVE_AND_LOAD)
+			{
+				char objectSaveData[2048];
+				SaveOrLoad = SAVE;
+				SaveData = objectSaveData;
+				OTH(LevelObjects[i].objectID, save_and_load)->in_out(LevelObjects[i].objectID);
+				FW("        [ \"%s\", %d, %d, %s ],", LevelObjects[i].prefab, LevelObjects[i].pos.x, LevelObjects[i].pos.y, objectSaveData);
+			}
+			else
+			{
+				FW("        [ \"%s\", %d, %d ],", LevelObjects[i].prefab, LevelObjects[i].pos.x, LevelObjects[i].pos.y);
+			}
 		}
 
 		FW("    ],");

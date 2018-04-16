@@ -900,6 +900,8 @@ void DrawSprite(game_sprite *s, uint32_t color, v2 pos, float rotation, v2 scale
 
 void DrawSprite(const char *sprite_name, uint32_t color, v2 pos, float rotation, v2 scale)
 {
+	if (!sprite_name)
+		return;
 	game_sprite *s = (game_sprite *)GetFromHash(&Sprites, sprite_name);
 	if (!s)
 	{

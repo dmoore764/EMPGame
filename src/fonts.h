@@ -49,7 +49,7 @@ struct font_character
 	font_size *fs;
 };
 
-void InitFont(font *f, const char *name, const char *directory, const char *file);
+void InitFont(font *f, const char *name, void *fileData, size_t fontLength);
 font_character *AddCharacterToFontSize(font_size *fs, int codepoint, bool render_immediately = false);
 void RenderSize(font *f, int pixel_size, char *characters_to_render);
 float GetAdvanceForCharacter(font *f, font_size *fs, font_character *fc, int codepoint, int next_codepoint);

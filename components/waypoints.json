@@ -1,0 +1,7 @@
+{
+	name : WAYPOINTS,
+	serialized : {
+		count  :			{ type : int },
+		points :			{ count: 3, type : ivec2 },
+	}
+}

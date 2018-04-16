@@ -3,9 +3,6 @@
 global_variable application App;
 global_variable renderer Rend;
 
-#include "components.h"
-#include "actions.h"
-
 #define MAP_W 1024
 #define MAP_H 1024
 global_variable uint8_t			TileMapI[MAP_W*MAP_H]; //interactive
@@ -20,6 +17,30 @@ struct level_objects
 
 global_variable level_objects LevelObjects[1000];
 global_variable int NumLevelObjects;
+
+enum persistent_data_type
+{
+	DATA_INT,
+	DATA_FLOAT,
+	DATA_STRING,
+	DATA_GENERIC,
+};
+
+struct persistent_data
+{
+	union
+	{
+		int i;
+		float f;
+		char *str;
+		void *data;
+	};
+};
+
+global_variable generic_hash PersistentData;
+
+#include "components.h"
+#include "actions.h"
 
 void DeleteLevelObject(int i)
 {
@@ -124,6 +145,7 @@ int main(int arg_count, char **args)
 		update->update = LevelSaver;
 	}
 
+	/*
 	{
 		int goId = AddObject(OBJ_MAGIC_BULLET_TRAIL_DRAWER);
 		auto meta = GO(metadata);
@@ -143,6 +165,7 @@ int main(int arg_count, char **args)
 		special_draw->draw = BasicBulletUpdateAndDraw;
 		special_draw->depth = 11;
 	}
+	*/
 
 	{
 		int goId = AddObject(OBJ_TILE_DRAWER);

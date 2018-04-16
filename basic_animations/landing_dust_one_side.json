@@ -1,0 +1,8 @@
+[
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided1" },
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided2" },
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided3" },
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided4" },
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided5" },
+	{ "time" : 0.06,		"sprite" : "LandingDustSingleSided6" },
+]

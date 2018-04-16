@@ -1,0 +1,8 @@
+{
+	name : PARENT,
+	
+	nonSerialized : {
+		parentID : { type : int, default: -1 },
+		offset : { type : ivec2, default: [0,0] },
+	}
+}

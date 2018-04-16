@@ -1,0 +1,17 @@
+{
+	type : OBJ_DOOR,
+	components : [ TRANSFORM, SPRITE, COLLIDER, STRING_STORAGE, SAVE_AND_LOAD ],
+	data : {
+		sprite : {
+			name : "Door",
+			depth: 2,
+		},
+		collider : {
+			ur : [1024, 1024],
+			bl : [-1024, 0],
+		},
+		save_and_load : {
+			in_out : "DoorSaveAndLoad",
+		},
+	}
+}

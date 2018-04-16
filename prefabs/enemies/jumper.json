@@ -1,0 +1,20 @@
+{
+	type : OBJ_ENEMY_JUMPER,
+	components : [ UPDATE, CUSTOM_FLAGS, PHYSICS, TRANSFORM, SPRITE, RIDES_PLATFORMS, COLLIDER ],
+	data : {
+		update : {
+			update : "JumperUpdate"
+		},
+		sprite : {
+			name : "JumpingEnemy1",
+			depth: 4,
+		},
+		collider : {
+			ur : [2560, 7168],
+			bl : [-2560, 0],
+		},
+		rides_platforms : {
+			size : [5120, 7168],
+		},
+	}
+}

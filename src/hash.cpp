@@ -80,6 +80,7 @@ uint32_t HashIndexForString(const char *str)
     uint32_t hash = 5381;
     int c;
 
+	assert(str);
     while ((c = *str++))
         hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
 

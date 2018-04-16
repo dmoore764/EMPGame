@@ -17,3 +17,5 @@ char *ReadFileIntoString(const char *filename);
 
 //This is for binary files
 void *ReadBinaryFile(const char *filename, size_t *length);
+
+void WriteBinaryFile(const char *filename, void *data, size_t length);

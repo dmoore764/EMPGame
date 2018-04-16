@@ -116,7 +116,8 @@ void *ReadBinaryFile(const char *filename, size_t *length)
     if (file) {
         fseek(file, 0L, SEEK_END);
         size_t size = ftell(file);
-        *length = size;
+		if (length)
+			*length = size;
         fseek(file, 0L, SEEK_SET);
         
         result = malloc(size);
@@ -157,3 +158,14 @@ void *ReadBinaryFile(const char *filename, size_t *length)
 	return result;
 #endif
 }
+
+void WriteBinaryFile(const char *filename, void *data, size_t length)
+{
+    FILE *file = fopen(filename, "w");
+	if (file)
+	{
+		fwrite(data, length, 1, file);
+		fclose(file);
+	}
+}
+

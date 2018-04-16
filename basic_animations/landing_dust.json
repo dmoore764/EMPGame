@@ -1,0 +1,9 @@
+[
+	{ "time" : 0.06,		"sprite" : "LandingDust1" },
+	{ "time" : 0.06,		"sprite" : "LandingDust2" },
+	{ "time" : 0.06,		"sprite" : "LandingDust3" },
+	{ "time" : 0.06,		"sprite" : "LandingDust4" },
+	{ "time" : 0.06,		"sprite" : "LandingDust5" },
+	{ "time" : 0.06,		"sprite" : "LandingDust6" },
+	{ "time" : 0.06,		"sprite" : "LandingDust7" },
+]

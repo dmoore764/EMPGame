@@ -62,5 +62,5 @@ poi *GetPOI(game_sprite *s, char *name)
 
 
 void AddAtlasToSpritePack(sprite_pack *pack);
-game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, dir_file *file, bool render_immediately);
-game_tile_sprites *AddTileSpritesToAvailableAtlas(sprite_pack *pack, dir_file *file, bool render_immediately);
+game_sprite *AddSpriteToAvailableAtlas(sprite_pack *pack, char *fileName, void *fileData, size_t fileLength, bool render_immediately);
+game_tile_sprites *AddTileSpritesToAvailableAtlas(sprite_pack *pack, char *fileName, void *fileData, size_t fileLength, bool render_immediately);

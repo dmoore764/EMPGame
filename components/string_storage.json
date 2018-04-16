@@ -1,0 +1,6 @@
+{
+	name : STRING_STORAGE,
+	nonSerialized : {
+		string : { type : "char *" },
+	}
+}

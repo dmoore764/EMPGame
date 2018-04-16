@@ -1,3 +1,50 @@
+//input string (each successive time you send in the result of next to get the next one)
+//
+// e.g.
+// char *start = "blah#blah1#blah2";
+// char result[64];
+// strsplit(start, '#', result, &start);
+// printf("%s", result);  --> "blah"
+//
+// strsplit(start, '#', result, &start);
+// printf("%s", result);  --> "blah1"
+//
+// strsplit(start, '#', result, &start);
+// printf("%s", result);  --> "blah2"
+//
+// strsplit(start, '#', result, &start);
+// printf("%s", result);  --> "" (also start is NULL now)
+//
+void strsplit(char *string, char delimiter, char *result, char **next)
+{
+	if (string)
+	{
+		char *split = strchr(string, delimiter);
+		if (split)
+		{
+			int length = (int)(split - string);
+			sprintf(result, "%.*s", length, string);
+			*next = string + length + 1;
+		}
+		else
+		{
+			sprintf(result, "%s", string);
+			*next = NULL;
+		}
+	}
+	else
+	{
+		result[0] = '\0';
+	}
+}
+
+void strsplitindex(char *string, char delimiter, int index, char *result)
+{
+	char *start = string;
+	for (int i = 0; i <= index; i++)
+		strsplit(start, delimiter, result, &start);
+}
+
 int strupr(char *dst, char *src)
 {
 	char *str=dst;
