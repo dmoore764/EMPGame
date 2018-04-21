@@ -1,15 +1,6 @@
 global_variable char DebugMessage[128];
 global_variable int DebugMessageCounter;
 
-enum save_and_load_options
-{
-	SAVE,
-	LOAD,
-};
-global_variable save_and_load_options SaveOrLoad;
-global_variable json_value *LoadData;
-global_variable char *SaveData;
-
 global_variable bool LevelLoaderInitialized;
 global_variable int OnLevel = 0;
 global_variable int LoadedLevel = 0;
@@ -20,15 +11,33 @@ inline v2 ToScreen(ivec2 p)
 	return result;
 }
 
+inline v2 ToScreen(ivec2 p, int layer)
+{
+	v2 result = {(float)((p.x - Camera.pos.x) >> layer), (float)((p.y - Camera.pos.y) >> layer)};
+	return result;
+}
+
 inline v2 ToScreen(int x, int y)
 {
 	v2 result = {(float)(x - Camera.pos.x), (float)(y - Camera.pos.y)};
 	return result;
 }
 
+inline v2 ToScreen(int x, int y, int layer)
+{
+	v2 result = {(float)((x - Camera.pos.x) >> layer), (float)((y - Camera.pos.y) >> layer)};
+	return result;
+}
+
 inline ivec2 FromScreen(vec2 p)
 {
 	ivec2 result = {Camera.pos.x + (int)p.x, Camera.pos.y + (int)p.y};
+	return result;
+}
+
+inline ivec2 FromScreen(vec2 p, int layer)
+{
+	ivec2 result = {Camera.pos.x + ((int)p.x << layer), Camera.pos.y + ((int)p.y << layer)};
 	return result;
 }
 
@@ -4608,32 +4617,6 @@ enum swooper_counters
 	SWOOPER_RANDOM_DIR_COUNT		= 2,
 };
 
-UPDATE_FUNCTION(SwooperSaveAndLoad)
-{
-	if (SaveOrLoad == LOAD)
-	{
-		if (LoadData)
-		{
-			//format [numWaypoints, [waypoint0.x, waypoint0.y], ...]
-			auto waypoints = GO(waypoints);
-			json_array *array = LoadData->array;
-			waypoints->count = array->GetByIndex(0)->number.i;
-			for (int i = 0; i < waypoints->count; i++)
-			{
-				json_array *point = array->GetByIndex(i+1)->array;
-				waypoints->points[i] = ivec2(GetJSONValAsInt(point->GetByIndex(0)), GetJSONValAsInt(point->GetByIndex(1)));
-			}
-		}
-	}
-	else if (SaveOrLoad == SAVE)
-	{
-		auto waypoints = GO(waypoints);
-		sprintf(SaveData, "[ %d, [%d, %d], [%d, %d], [%d, %d] ]", waypoints->count, waypoints->points[0].x, waypoints->points[0].y, 
-																					waypoints->points[1].x, waypoints->points[1].y, 
-																					waypoints->points[2].x, waypoints->points[2].y);
-	}
-}
-
 UPDATE_FUNCTION(SwooperUpdate)
 {
 	auto phys = GO(physics);
@@ -4810,25 +4793,6 @@ UPDATE_FUNCTION(SwooperUpdate)
 	}
 
 	EnemyTileCollisions(goId, &tileInfo);
-}
-
-UPDATE_FUNCTION(DoorSaveAndLoad)
-{
-	if (SaveOrLoad == LOAD)
-	{
-		if (LoadData)
-		{
-			//format [numWaypoints, [waypoint0.x, waypoint0.y], ...]
-			auto str = GO(string_storage);
-			json_array *array = LoadData->array;
-			str->string = array->GetByIndex(0)->string;
-		}
-	}
-	else if (SaveOrLoad == SAVE)
-	{
-		auto str = GO(string_storage);
-		sprintf(SaveData, "[ \"%s\" ]", str->string);
-	}
 }
 
 
@@ -5139,9 +5103,10 @@ UPDATE_FUNCTION(DebugFunctionsUpdateAndDraw)
 			DrawTextGui(2, curY, " >>");
 			if (KeyboardPresses[KB_ENTER])
 			{
+				stbi_write_png("spritepack.png", SpritePack.atlas[0].tex->width, SpritePack.atlas[0].tex->height, 4, SpritePack.atlas[0].rgba_tex_data, SpritePack.atlas[0].tex->width*4);
 			}
 		}
-		DrawTextGui(5, curY, "Reload Data Pak");
+		DrawTextGui(5, curY, "Save out texture atlas");
 	}
 	
 		
@@ -5191,6 +5156,7 @@ UPDATE_FUNCTION(LevelSelect)
 
 	HashEndIteration(iter); 
 }
+
 
 UPDATE_FUNCTION(LevelLoader)
 {
@@ -5269,23 +5235,18 @@ UPDATE_FUNCTION(LevelLoader)
 					{
 						level_objects *obj = &LevelObjects[NumLevelObjects++];
 						obj->prefab = item->array->GetByIndex(0)->string;
-						obj->pos = {GetJSONValAsInt(item->array->GetByIndex(1)), GetJSONValAsInt(item->array->GetByIndex(2))};
 
 						json_data_file *prefab = (json_data_file *)GetFromHash(&PrefabData, obj->prefab);
 						assert(prefab);
 						obj->objectID = DeserializeObject(prefab->val);
-						OTH(obj->objectID, transform)->pos = obj->pos;
 						OTH(obj->objectID, metadata)->flags |= GAME_OBJECT;
 
-						auto metadata = OTH(obj->objectID, metadata);
-						if (metadata->cmpInUse & SAVE_AND_LOAD)
-						{
-							json_value *serializedData = item->array->num_elements == 4 ? item->array->GetByIndex(3) : NULL;
-							auto saveandload = OTH(obj->objectID, save_and_load);
-							SaveOrLoad = LOAD;
-							LoadData = serializedData;
-							saveandload->in_out(obj->objectID);
-						}
+						json_hash *serializedData = item->array->GetByIndex(1)->hash;
+						json_hash_element *el = serializedData->first;
+						DeserializeData(el, obj->objectID);
+
+						obj->pos = OTH(obj->objectID, transform)->pos;
+						obj->layer = OTH(obj->objectID, transform)->layer;
 
 						item = item->next;
 					}
@@ -6007,6 +5968,22 @@ global_variable json_data_file *SelectedPrefab;
 global_variable int PlacedPrefabID;
 global_variable bool PrefabPlacerInit;
 
+
+UPDATE_FUNCTION(PrefabPlacerEditorDraw)
+{
+	SetShader("basic_tex_color");
+	SetFontAsPercentageOfScreen("JackInput", 2.4f);
+	SetFontColor(MAKE_COLOR(255,100,0,255));
+	if (OTH(PlacedPrefabID, transform)->layer > 0)
+		DrawTextGui(40, 94, "In background, layer : %d", OTH(PlacedPrefabID, transform)->layer);
+	else
+		DrawTextGui(40, 94, "In main layer");
+
+	auto tx = OTH(PlacedPrefabID, transform);
+	DrawTextGui(40, 91, "x, y: %d, %d", tx->pos.x, tx->pos.y);
+}
+
+
 UPDATE_FUNCTION(PrefabPlacer)
 {
 	if (!PrefabPlacerInit)
@@ -6014,14 +5991,26 @@ UPDATE_FUNCTION(PrefabPlacer)
 		PrefabPlacerInit = true;
 		PlacedPrefabID = DeserializeObject(SelectedPrefab->val);
 	}
-	if (KeyboardPresses[KB_ESCAPE])
+
+	if (KeyboardPresses[KB_0])
+		OTH(PlacedPrefabID, transform)->layer = 0;
+	if (KeyboardPresses[KB_1])
+		OTH(PlacedPrefabID, transform)->layer = 1;
+	if (KeyboardPresses[KB_2])
+		OTH(PlacedPrefabID, transform)->layer = 2;
+	if (KeyboardPresses[KB_3])
+		OTH(PlacedPrefabID, transform)->layer = 3;
+	if (KeyboardPresses[KB_4])
+		OTH(PlacedPrefabID, transform)->layer = 4;
+
+	if (KeyboardPresses[KB_D] || KeyboardPresses[KB_ESCAPE])
 	{
 		RemoveObject(PlacedPrefabID);
 		PrefabPlacerInit = false;
 		RemoveObject(goId);
 	}
 	auto tx = OTH(PlacedPrefabID, transform);
-	tx->pos = FromScreen(MousePos);
+	tx->pos = FromScreen(MousePos, tx->layer);
 	tx->pos.x &= ~0x1ff;
 	tx->pos.y &= ~0x1ff;
 
@@ -6030,6 +6019,7 @@ UPDATE_FUNCTION(PrefabPlacer)
 		level_objects *obj = &LevelObjects[NumLevelObjects++];
 		obj->prefab = SelectedPrefab->baseName;
 		obj->pos = tx->pos;
+		obj->layer = tx->layer;
 		obj->objectID = PlacedPrefabID;
 
 		//this will release the object from being held
@@ -6128,16 +6118,18 @@ UPDATE_FUNCTION(PrefabSelect)
 			if (OnPrefab >= 0)
 			{
 				//reset everything
-				InPrefabFolder = -1;
-				OnPrefabFolder = -1;
-				ExitEditorMode();
+				//InPrefabFolder = -1;
+				//OnPrefabFolder = -1;
+				//ExitEditorMode();
 
 				int id = AddObject(OBJ_PREFAB_PLACER);
 				auto meta = OTH(id, metadata);
-				meta->cmpInUse = SPECIAL_DRAW;
+				meta->cmpInUse = SPECIAL_DRAW | DRAW_EDITOR_GUI;
 				auto draw = OTH(id, special_draw);
+				auto editor_draw = OTH(id, draw_editor_gui);
 				draw->draw = PrefabPlacer;
 				draw->depth = 30;
+				editor_draw->draw = PrefabPlacerEditorDraw;
 
 				if (PrefabPlacerInit)
 				{
@@ -6151,9 +6143,9 @@ UPDATE_FUNCTION(PrefabSelect)
 
 	if (InPrefabFolder != OnPrefabFolder)
 	{
-		if (KeyboardPresses[KB_DOWN])
+		if (KeyboardPresses[KB_J])
 			OnPrefabFolder = Min(OnPrefabFolder + 1, NumPrefabFolders - 1);
-		else if (KeyboardPresses[KB_UP])
+		else if (KeyboardPresses[KB_K])
 			OnPrefabFolder = Max(OnPrefabFolder - 1, 0);
 	}
 	else
@@ -6162,9 +6154,9 @@ UPDATE_FUNCTION(PrefabSelect)
 		{
 			InPrefabFolder = -1;
 		}
-		if (KeyboardPresses[KB_DOWN])
+		if (KeyboardPresses[KB_J])
 			OnPrefab = Min(OnPrefab + 1, NumPrefabs - 1);
-		else if (KeyboardPresses[KB_UP])
+		else if (KeyboardPresses[KB_K])
 			OnPrefab = Max(OnPrefab - 1, 0);
 	}
 
@@ -6201,7 +6193,7 @@ UPDATE_FUNCTION(PrefabSelect)
 	}
 
 	DrawTextGui(2, 10, "Controls");
-	DrawTextGui(2, 7, "Up/Down, Enter to select");
+	DrawTextGui(2, 7, "J/K for up, down, Enter to select");
 	if (InPrefabFolder == OnPrefabFolder)
 		DrawTextGui(2, 4, "Press B to back out of folder");
 }
@@ -6228,7 +6220,7 @@ UPDATE_FUNCTION(PrefabMover)
 	if (DraggingPrefab >= 0)
 	{
 		level_objects *obj = &LevelObjects[DraggingPrefab];
-		obj->pos = FromScreen(MousePos);
+		obj->pos = FromScreen(MousePos, obj->layer);
 		obj->pos.x &= ~0x1ff;
 		obj->pos.y &= ~0x1ff;
 		auto tx = OTH(obj->objectID, transform);
@@ -6250,10 +6242,6 @@ UPDATE_FUNCTION(PrefabMover)
 	if (deleting)
 		color = MAKE_COLOR(255,100,100,255);
 
-	ivec2 gamePosInPixels = FromScreen(MousePos);
-	gamePosInPixels.x >>= 9;
-	gamePosInPixels.y >>= 9;
-
 	bool reseting = KeyboardPresses[KB_R] && !ShiftHeld;
 
 	for (int i = 0; i < NumLevelObjects; i++)
@@ -6273,13 +6261,19 @@ UPDATE_FUNCTION(PrefabMover)
 		int xInPixels = x >> 9;
 		int yInPixels = y >> 9;
 
+		ivec2 gamePosInPixels = FromScreen(MousePos, obj->layer);
+		gamePosInPixels.x >>= 9;
+		gamePosInPixels.y >>= 9;
+
 		uint32_t highlight = MAKE_COLOR(200,255,200,100);
 		if (deleting)
 			highlight = MAKE_COLOR(255,100,50,100);
 		if (i == DraggingPrefab)
 			highlight = MAKE_COLOR(255,200,200,100);
 
-		if (LengthSq(ivec2(xInPixels,yInPixels) - gamePosInPixels) < 25)
+		v2 objectPos = ToScreen(obj->pos, obj->layer);
+		ivec2 objectPosInPixels(((int)objectPos.x)>>9,((int)objectPos.y)>>9);
+		if (LengthSq(ivec2(((int)MousePos.x)>>9,((int)MousePos.y)>>9) - objectPosInPixels) < 25)
 		{
 			if (MousePresses[0])
 			{
@@ -6292,36 +6286,36 @@ UPDATE_FUNCTION(PrefabMover)
 					DraggingPrefab = i;
 			}
 
-			DrawCircle(highlight, ToScreen(x, y), (6<<9));
+			DrawCircle(highlight, ToScreen(x, y, obj->layer), (6<<9));
 		}
 
 		if (deleting)
 		{
-			DrawLine(color, color, ToScreen(x - (3<<9), y + (3<<9)), ToScreen(x + (3<<9), y - (3<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x + (3<<9), y + (3<<9)), ToScreen(x - (3<<9), y - (3<<9)), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(-3<<9, 3<<9), ToScreen(x,y,obj->layer) + V2(3<<9, -3<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(3<<9, 3<<9), ToScreen(x,y,obj->layer) + V2(-3<<9, -3<<9), 0x100);
 		}
 		else
 		{
-			DrawCircle(color, ToScreen(x, y), 0x400);
+			DrawCircle(color, ToScreen(x, y, obj->layer), 0x400);
 
-			DrawLine(color, color, ToScreen(x, y - (5<<9)), ToScreen(x, y + (5<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x - (5<<9), y), ToScreen(x + (5<<9), y), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(0,-5<<9), ToScreen(x,y,obj->layer) + V2(0,5<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(-5<<9,0), ToScreen(x,y,obj->layer) + V2(5<<9,0), 0x100);
 
 			//top arrow
-			DrawLine(color, color, ToScreen(x, y + (5<<9)), ToScreen(x - (2<<9), y + (3<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x, y + (5<<9)), ToScreen(x + (2<<9), y + (3<<9)), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(0,5<<9), ToScreen(x,y,obj->layer) + V2(-2<<9,3<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(0,5<<9), ToScreen(x,y,obj->layer) + V2(2<<9,3<<9), 0x100);
 
 			//bottom arrow
-			DrawLine(color, color, ToScreen(x, y - (5<<9)), ToScreen(x - (2<<9), y - (3<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x, y - (5<<9)), ToScreen(x + (2<<9), y - (3<<9)), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(0,-5<<9), ToScreen(x,y,obj->layer) + V2(-2<<9,-3<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(0,-5<<9), ToScreen(x,y,obj->layer) + V2(2<<9,-3<<9), 0x100);
 
 			//left arrow
-			DrawLine(color, color, ToScreen(x - (5<<9), y), ToScreen(x - (3<<9), y - (2<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x - (5<<9), y), ToScreen(x - (3<<9), y + (2<<9)), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(-5<<9,0), ToScreen(x,y,obj->layer) + V2(-3<<9,-2<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(-5<<9,0), ToScreen(x,y,obj->layer) + V2(-3<<9,2<<9), 0x100);
 
 			//right arrow
-			DrawLine(color, color, ToScreen(x + (5<<9), y), ToScreen(x + (3<<9), y - (2<<9)), 0x100);
-			DrawLine(color, color, ToScreen(x + (5<<9), y), ToScreen(x + (3<<9), y + (2<<9)), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(5<<9,0), ToScreen(x,y,obj->layer) + V2(3<<9,-2<<9), 0x100);
+			DrawLine(color, color, ToScreen(x,y,obj->layer) + V2(5<<9,0), ToScreen(x,y,obj->layer) + V2(3<<9,2<<9), 0x100);
 		}
 	}
 }
@@ -6623,7 +6617,7 @@ UPDATE_FUNCTION(ModeSelector)
 	else if (ShiftHeld && KeyboardPresses[KB_P] && EditorMode == NONE)
 	{
 		ExitEditorMode();
-		FocusFunction = PlayerFocus;
+		FocusFunction = FreelyMoveableFocus;
 		CameraUpdateFunction = CameraLerpFunction;
 		EditorMode = DISPLAY_PREFAB_MENU;
 		PrefabSelectID = AddObject(OBJ_PREFAB_SELECTOR);
@@ -6707,7 +6701,5 @@ void InitGameFunctions()
 	ADD_GAME_FUNCTION(StandinUpdate);
 	ADD_GAME_FUNCTION(JumperUpdate);
 	ADD_GAME_FUNCTION(SwooperUpdate);
-	ADD_GAME_FUNCTION(SwooperSaveAndLoad);
-	ADD_GAME_FUNCTION(DoorSaveAndLoad);
 }
 

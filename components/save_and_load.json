@@ -1,6 +1,0 @@
-{
-	name : SAVE_AND_LOAD,
-	nonSerialized : {
-		in_out :	{ type : "update_function *" },
-	}
-}

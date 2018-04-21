@@ -1,6 +1,6 @@
 {
 	type : OBJ_ENEMY_SWOOPER,
-	components : [ UPDATE, CUSTOM_FLAGS, PHYSICS, TRANSFORM, SPRITE, COLLIDER, WAYPOINTS, SAVE_AND_LOAD ],
+	components : [ UPDATE, CUSTOM_FLAGS, PHYSICS, TRANSFORM, SPRITE, COLLIDER, WAYPOINTS ],
 	data : {
 		update : {
 			update : "SwooperUpdate"
@@ -12,9 +12,8 @@
 		collider : {
 			ur : [3072, 4608],
 			bl : [-3072, 0],
-		},
-		save_and_load : {
-			in_out : "SwooperSaveAndLoad"
+			category : 0x2,
+			mask : 0x1,
 		},
 	}
 }

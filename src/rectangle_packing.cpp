@@ -14,9 +14,9 @@ bool FindPlaceInAtlas(rectangle_atlas *atlas, int rect_index)
 	int w = atlas->rects[rect_index].w;
 	int h = atlas->rects[rect_index].h;
 
-	for (int y = atlas->outer_border; y + h < atlas->h - atlas->outer_border; y++)
+	for (int y = atlas->outer_border; y + h < atlas->h - atlas->outer_border - 1; y++)
 	{
-		for (int x = atlas->outer_border; x + w < atlas->w - atlas->outer_border; )
+		for (int x = atlas->outer_border; x + w < atlas->w - atlas->outer_border - 1; )
 		{
 			bool found_location = true;
 			for (int i = 0; i < rect_index; i++)

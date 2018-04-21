@@ -2,8 +2,11 @@
 	name : TRANSFORM,
 	serialized : {
 		pos : { type: ivec2 },
-		oldY : { type: int },
 		rot : { type: float },
-		scale : { type: vec2, default: [1,1] }
+		scale : { type: vec2, default: [1,1] },
+		layer : { type: int },
+	},
+	nonSerialized : {
+		oldY : { type: int },
 	}
 }

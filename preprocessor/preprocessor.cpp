@@ -719,23 +719,8 @@ int main (int argcount, char **args)
 		FW("");
 		FW("void AnimationUpdate(int goId);");
 		FW("");
-
-		FW("int DeserializeObject(json_value *val)");
+		FW("void DeserializeData(json_hash_element *el, int goId)");
 		FW("{");
-		FW("	int goId = AddObject(GetObjectType(val->hash->GetByKey(\"type\")->string));");
-		FW("	auto meta = GO(metadata);");
-		FW("	json_value *components = val->hash->GetByKey(\"components\");");
-		FW("	json_value *item = components->array->first;");
-		FW("	while (item)");
-		FW("	{");
-		FW("		meta->cmpInUse |= GetComponentType(item->string);");
-		FW("		item = item->next;");
-		FW("	}");
-		FW("    InitObject(goId);");
-		FW("");
-		FW("	json_value *data = val->hash->GetByKey(\"data\");");
-		FW("	json_hash_element *el = data->hash->first;");
-		FW("");
 		FW("	while (el)");
 		FW("	{");
 
@@ -893,6 +878,27 @@ int main (int argcount, char **args)
 		FW("        else { assert(false); } //didn't find member");
 		FW("        el = el->next;");
 		FW("	}");
+		FW("}");
+		FW("");
+		FW("");
+
+		FW("int DeserializeObject(json_value *val)");
+		FW("{");
+		FW("	int goId = AddObject(GetObjectType(val->hash->GetByKey(\"type\")->string));");
+		FW("	auto meta = GO(metadata);");
+		FW("	json_value *components = val->hash->GetByKey(\"components\");");
+		FW("	json_value *item = components->array->first;");
+		FW("	while (item)");
+		FW("	{");
+		FW("		meta->cmpInUse |= GetComponentType(item->string);");
+		FW("		item = item->next;");
+		FW("	}");
+		FW("    InitObject(goId);");
+		FW("");
+		FW("	json_value *data = val->hash->GetByKey(\"data\");");
+		FW("	json_hash_element *el = data->hash->first;");
+		FW("");
+		FW("	DeserializeData(el, goId);");
 		FW("");
 		FW("    meta->flags |= GAME_OBJECT;");
 		FW("    if ((meta->cmpInUse & ANIM) && (meta->cmpInUse & SPRITE))");
@@ -900,7 +906,105 @@ int main (int argcount, char **args)
 		FW("");
 		FW("	return goId;");
 		FW("}");
+		FW("");
+		FW("");
+		FW("");
 
+		FW("void SerializeObject(char *result, uint32_t componentsToSerialize, int goId)");
+		FW("{");
+		FW("    sprintf(result, \"{ \");");
+		FW("	char temp[1024];");
+		FW("	auto meta = GO(metadata);");
+
+		for (int i = 0; i < numComponents; i++)
+		{
+			char memberName[128];
+			strlwr(memberName, components[i]->baseName);
+			char memberNameUpper[128];
+			strupr(memberNameUpper, components[i]->baseName);
+
+			FW("	if ((componentsToSerialize & %s) && (meta->cmpInUse & %s))", memberNameUpper, memberNameUpper);
+			FW("	{");
+			FW("		auto c = GO(%s);", memberName);
+			FW("		sprintf(temp, \"%s : { \");", memberName);
+			FW("		strcat(result, temp);");
+
+			bool firstMember = true;
+			json_value *serialized = components[i]->val->hash->GetByKey("serialized");
+			if (serialized)
+			{
+				json_hash_element *item = serialized->hash->first;
+				while (item)
+				{
+					char *type = item->value->hash->GetByKey("type")->string;
+					json_value *count = item->value->hash->GetByKey("count");
+					if (count)
+					{
+						item = item->next;
+						continue;
+					}
+					FW("");
+					if (strcmp(type, "vec2") == 0)
+					{
+						FW("		sprintf(temp, \"%s : [ %%f, %%f ], \", c->%s.x, c->%s.y);", item->key, item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					if (strcmp(type, "ivec2") == 0)
+					{
+						FW("		sprintf(temp, \"%s : [ %%d, %%d ], \", c->%s.x, c->%s.y);", item->key, item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					if (strcmp(type, "uvec2") == 0)
+					{
+						FW("		sprintf(temp, \"%s : [ %%d, %%d ], \", c->%s.x, c->%s.y);", item->key, item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "int") == 0)
+					{
+						FW("		sprintf(temp, \"%s : %%d, \", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "char *") == 0)
+					{
+						FW("		sprintf(temp, \"%s : \\\"%%s\\\"\", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "bool") == 0)
+					{
+						FW("		sprintf(temp, \"%s : %%s, \", c->%s ? \"true\" : \"false\");", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "float") == 0)
+					{
+						FW("		sprintf(temp, \"%s : %%f, \", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "uint32_t") == 0)
+					{
+						FW("		sprintf(temp, \"%s : %%d, \", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "uint16_t") == 0)
+					{
+						FW("		sprintf(temp, \"%s : %%d, \", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					else if (strcmp(type, "size_t") == 0 && !count)
+					{
+						FW("		sprintf(temp, \"%s : %%zu, \", c->%s);", item->key, item->key);
+						FW("		strcat(result, temp);");
+					}
+					item = item->next;
+				}
+			}
+
+			FW("		strcat(result, \" }, \");");
+			FW("	}");
+		}
+
+		FW("	strcat(result, \" }, \");");
+		FW("}");
+		FW("");
 	}
 
 

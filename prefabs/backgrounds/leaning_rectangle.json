@@ -1,0 +1,13 @@
+{
+	type : OBJ_BACKGROUND,
+	components : [ TRANSFORM, SPRITE ],
+	data : {
+		sprite : {
+			name : "LeaningRectangle",
+			depth : 0,
+		},
+		transform : {
+			layer : 1,
+		},
+	}
+}

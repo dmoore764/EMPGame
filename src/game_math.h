@@ -34,6 +34,22 @@ struct v2
 	float x,y;
 };
 
+v2 V2(float x, float y)
+{
+	v2 result;
+	result.x = x;
+	result.y = y;
+	return result;
+}
+
+v2i V2I(int x, int y)
+{
+	v2i result;
+	result.x = x;
+	result.y = y;
+	return result;
+}
+
 v2 operator+(const v2 &a, const v2 &b)
 {
 	v2 result;

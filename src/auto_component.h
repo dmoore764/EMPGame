@@ -47,19 +47,18 @@ enum component_type {
     PARENT = 0x4,
     PHYSICS = 0x8,
     RIDES_PLATFORMS = 0x10,
-    SAVE_AND_LOAD = 0x20,
-    STRING_STORAGE = 0x40,
-    TRANSFORM = 0x80,
-    UPDATE = 0x100,
-    WAYPOINTS = 0x200,
-    ANIM = 0x400,
-    CUSTOM_FLAGS = 0x800,
-    COLLIDER = 0x1000,
-    SPECIAL_DRAW = 0x2000,
-    DIALOG = 0x4000,
-    COUNTERS = 0x8000,
-    MOVING_PLATFORM = 0x10000,
-    SPRITE = 0x20000,
+    STRING_STORAGE = 0x20,
+    TRANSFORM = 0x40,
+    UPDATE = 0x80,
+    WAYPOINTS = 0x100,
+    ANIM = 0x200,
+    CUSTOM_FLAGS = 0x400,
+    COLLIDER = 0x800,
+    SPECIAL_DRAW = 0x1000,
+    DIALOG = 0x2000,
+    COUNTERS = 0x4000,
+    MOVING_PLATFORM = 0x8000,
+    SPRITE = 0x10000,
 };
 
 
@@ -104,16 +103,9 @@ struct cmp_rides_platforms
 };
 
 
-struct cmp_save_and_load
-{
-    //nonSerialized members
-    update_function * in_out;
-};
-
-
 struct cmp_string_storage
 {
-    //nonSerialized members
+    //serialized members
     char * string;
 };
 
@@ -122,9 +114,12 @@ struct cmp_transform
 {
     //serialized members
     ivec2 pos;
-    int oldY;
     float rot;
     vec2 scale;
+    int layer;
+
+    //nonSerialized members
+    int oldY;
 };
 
 
@@ -224,7 +219,6 @@ struct game_object
     cmp_parent parent;
     cmp_physics physics;
     cmp_rides_platforms rides_platforms;
-    cmp_save_and_load save_and_load;
     cmp_string_storage string_storage;
     cmp_transform transform;
     cmp_update update;
@@ -269,7 +263,6 @@ int AddObject(object_type type)
     go->parent = {};
     go->physics = {};
     go->rides_platforms = {};
-    go->save_and_load = {};
     go->string_storage = {};
     go->transform = {};
     go->update = {};
@@ -327,11 +320,6 @@ void InitObject(int goId)
         auto member = GO(rides_platforms);
         member->platformID = -1;
     }
-    if (meta->cmpInUse & SAVE_AND_LOAD)
-    {
-        auto member = GO(save_and_load);
-        member->in_out = NULL;
-    }
     if (meta->cmpInUse & STRING_STORAGE)
     {
         auto member = GO(string_storage);
@@ -340,9 +328,10 @@ void InitObject(int goId)
     if (meta->cmpInUse & TRANSFORM)
     {
         auto member = GO(transform);
-        member->oldY = 0;
         member->rot = 0.0f;
         member->scale = vec2(1.000000f,1.000000f);
+        member->layer = 0;
+        member->oldY = 0;
     }
     if (meta->cmpInUse & UPDATE)
     {
@@ -496,8 +485,6 @@ component_type GetComponentType(char *type)
         return PHYSICS;
     if (strcmp(type, "RIDES_PLATFORMS") == 0)
         return RIDES_PLATFORMS;
-    if (strcmp(type, "SAVE_AND_LOAD") == 0)
-        return SAVE_AND_LOAD;
     if (strcmp(type, "STRING_STORAGE") == 0)
         return STRING_STORAGE;
     if (strcmp(type, "TRANSFORM") == 0)
@@ -531,22 +518,8 @@ component_type GetComponentType(char *type)
 
 void AnimationUpdate(int goId);
 
-int DeserializeObject(json_value *val)
+void DeserializeData(json_hash_element *el, int goId)
 {
-	int goId = AddObject(GetObjectType(val->hash->GetByKey("type")->string));
-	auto meta = GO(metadata);
-	json_value *components = val->hash->GetByKey("components");
-	json_value *item = components->array->first;
-	while (item)
-	{
-		meta->cmpInUse |= GetComponentType(item->string);
-		item = item->next;
-	}
-    InitObject(goId);
-
-	json_value *data = val->hash->GetByKey("data");
-	json_hash_element *el = data->hash->first;
-
 	while (el)
 	{
 		if (strcmp(el->key, "draw_editor_gui") == 0)
@@ -636,19 +609,6 @@ int DeserializeObject(json_value *val)
 				member = member->next;
 			}
 		}
-		else if (strcmp(el->key, "save_and_load") == 0)
-		{
-			auto c = GO(save_and_load);
-			json_hash_element *member = el->value->hash->first;
-			while (member)
-			{
-				if (strcmp(member->key, "in_out") == 0)
-                {
-                    c->in_out = GetFunction(member->value->string);
-                }
-				member = member->next;
-			}
-		}
 		else if (strcmp(el->key, "string_storage") == 0)
 		{
 			auto c = GO(string_storage);
@@ -672,10 +632,6 @@ int DeserializeObject(json_value *val)
                 {
                     DeserializeIvec2(member->value, &c->pos);
                 }
-				else if (strcmp(member->key, "oldY") == 0)
-                {
-                    DeserializeInt(member->value, &c->oldY);
-                }
 				else if (strcmp(member->key, "rot") == 0)
                 {
                     DeserializeFloat(member->value, &c->rot);
@@ -683,6 +639,14 @@ int DeserializeObject(json_value *val)
 				else if (strcmp(member->key, "scale") == 0)
                 {
                     DeserializeVec2(member->value, &c->scale);
+                }
+				else if (strcmp(member->key, "layer") == 0)
+                {
+                    DeserializeInt(member->value, &c->layer);
+                }
+				else if (strcmp(member->key, "oldY") == 0)
+                {
+                    DeserializeInt(member->value, &c->oldY);
                 }
 				member = member->next;
 			}
@@ -877,6 +841,26 @@ int DeserializeObject(json_value *val)
         else { assert(false); } //didn't find member
         el = el->next;
 	}
+}
+
+
+int DeserializeObject(json_value *val)
+{
+	int goId = AddObject(GetObjectType(val->hash->GetByKey("type")->string));
+	auto meta = GO(metadata);
+	json_value *components = val->hash->GetByKey("components");
+	json_value *item = components->array->first;
+	while (item)
+	{
+		meta->cmpInUse |= GetComponentType(item->string);
+		item = item->next;
+	}
+    InitObject(goId);
+
+	json_value *data = val->hash->GetByKey("data");
+	json_hash_element *el = data->hash->first;
+
+	DeserializeData(el, goId);
 
     meta->flags |= GAME_OBJECT;
     if ((meta->cmpInUse & ANIM) && (meta->cmpInUse & SPRITE))
@@ -884,3 +868,199 @@ int DeserializeObject(json_value *val)
 
 	return goId;
 }
+
+
+
+void SerializeObject(char *result, uint32_t componentsToSerialize, int goId)
+{
+    sprintf(result, "{ ");
+	char temp[1024];
+	auto meta = GO(metadata);
+	if ((componentsToSerialize & DRAW_EDITOR_GUI) && (meta->cmpInUse & DRAW_EDITOR_GUI))
+	{
+		auto c = GO(draw_editor_gui);
+		sprintf(temp, "draw_editor_gui : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & DRAW_GAME_GUI) && (meta->cmpInUse & DRAW_GAME_GUI))
+	{
+		auto c = GO(draw_game_gui);
+		sprintf(temp, "draw_game_gui : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & PARENT) && (meta->cmpInUse & PARENT))
+	{
+		auto c = GO(parent);
+		sprintf(temp, "parent : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & PHYSICS) && (meta->cmpInUse & PHYSICS))
+	{
+		auto c = GO(physics);
+		sprintf(temp, "physics : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "vel : [ %d, %d ], ", c->vel.x, c->vel.y);
+		strcat(result, temp);
+
+		sprintf(temp, "accel : [ %d, %d ], ", c->accel.x, c->accel.y);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & RIDES_PLATFORMS) && (meta->cmpInUse & RIDES_PLATFORMS))
+	{
+		auto c = GO(rides_platforms);
+		sprintf(temp, "rides_platforms : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & STRING_STORAGE) && (meta->cmpInUse & STRING_STORAGE))
+	{
+		auto c = GO(string_storage);
+		sprintf(temp, "string_storage : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "string : \"%s\"", c->string);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & TRANSFORM) && (meta->cmpInUse & TRANSFORM))
+	{
+		auto c = GO(transform);
+		sprintf(temp, "transform : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "pos : [ %d, %d ], ", c->pos.x, c->pos.y);
+		strcat(result, temp);
+
+		sprintf(temp, "rot : %f, ", c->rot);
+		strcat(result, temp);
+
+		sprintf(temp, "scale : [ %f, %f ], ", c->scale.x, c->scale.y);
+		strcat(result, temp);
+
+		sprintf(temp, "layer : %d, ", c->layer);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & UPDATE) && (meta->cmpInUse & UPDATE))
+	{
+		auto c = GO(update);
+		sprintf(temp, "update : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & WAYPOINTS) && (meta->cmpInUse & WAYPOINTS))
+	{
+		auto c = GO(waypoints);
+		sprintf(temp, "waypoints : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "count : %d, ", c->count);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & ANIM) && (meta->cmpInUse & ANIM))
+	{
+		auto c = GO(anim);
+		sprintf(temp, "anim : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "name : \"%s\"", c->name);
+		strcat(result, temp);
+
+		sprintf(temp, "playing : %s, ", c->playing ? "true" : "false");
+		strcat(result, temp);
+
+		sprintf(temp, "loop : %s, ", c->loop ? "true" : "false");
+		strcat(result, temp);
+
+		sprintf(temp, "speedFactor : %f, ", c->speedFactor);
+		strcat(result, temp);
+
+		sprintf(temp, "frameTime : %f, ", c->frameTime);
+		strcat(result, temp);
+
+		sprintf(temp, "currentFrame : %d, ", c->currentFrame);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & CUSTOM_FLAGS) && (meta->cmpInUse & CUSTOM_FLAGS))
+	{
+		auto c = GO(custom_flags);
+		sprintf(temp, "custom_flags : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "bits : %d, ", c->bits);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & COLLIDER) && (meta->cmpInUse & COLLIDER))
+	{
+		auto c = GO(collider);
+		sprintf(temp, "collider : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & SPECIAL_DRAW) && (meta->cmpInUse & SPECIAL_DRAW))
+	{
+		auto c = GO(special_draw);
+		sprintf(temp, "special_draw : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & DIALOG) && (meta->cmpInUse & DIALOG))
+	{
+		auto c = GO(dialog);
+		sprintf(temp, "dialog : { ");
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & COUNTERS) && (meta->cmpInUse & COUNTERS))
+	{
+		auto c = GO(counters);
+		sprintf(temp, "counters : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "counters : %d, ", c->counters);
+		strcat(result, temp);
+
+		sprintf(temp, "counters2 : %d, ", c->counters2);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & MOVING_PLATFORM) && (meta->cmpInUse & MOVING_PLATFORM))
+	{
+		auto c = GO(moving_platform);
+		sprintf(temp, "moving_platform : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "bl : [ %d, %d ], ", c->bl.x, c->bl.y);
+		strcat(result, temp);
+
+		sprintf(temp, "ur : [ %d, %d ], ", c->ur.x, c->ur.y);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	if ((componentsToSerialize & SPRITE) && (meta->cmpInUse & SPRITE))
+	{
+		auto c = GO(sprite);
+		sprintf(temp, "sprite : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "depth : %d, ", c->depth);
+		strcat(result, temp);
+
+		sprintf(temp, "name : \"%s\"", c->name);
+		strcat(result, temp);
+
+		sprintf(temp, "color : %d, ", c->color);
+		strcat(result, temp);
+		strcat(result, " }, ");
+	}
+	strcat(result, " }, ");
+}
+

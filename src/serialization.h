@@ -22,6 +22,24 @@ struct MemberInfo
 
 #define FW(format, ...) {fprintf(file, format, ##__VA_ARGS__);fprintf(file,"\n");}
 
+/*void SerializeObject(char *result, uint32_t componentsToSerialize, int goId)
+{
+	sprintf(result, "{ ");
+	char temp[1024];
+	auto meta = GO(metadata);
+	if ((componentsToSerialize & TRANSFORM) && meta->cmpInUse & TRANSFORM)
+	{
+		auto cmp = GO(transform);
+		sprintf(temp, "transform : { ");
+		strcat(result, temp);
+
+		sprintf(temp, "pos : [ %d, %d ], ", cmp->pos.x, cmp->pos.y);
+		strcat(result, temp);
+
+		strcat(temp, " }, ");
+	}
+}*/
+
 void SerializeLevel(bool *savedLevel, char *levelName)
 {
 	char levelFullPath[1024];
@@ -89,18 +107,9 @@ void SerializeLevel(bool *savedLevel, char *levelName)
 
 		for (int i = 0; i < NumLevelObjects; i++)
 		{
-			if (OTH(LevelObjects[i].objectID, metadata)->cmpInUse & SAVE_AND_LOAD)
-			{
-				char objectSaveData[2048];
-				SaveOrLoad = SAVE;
-				SaveData = objectSaveData;
-				OTH(LevelObjects[i].objectID, save_and_load)->in_out(LevelObjects[i].objectID);
-				FW("        [ \"%s\", %d, %d, %s ],", LevelObjects[i].prefab, LevelObjects[i].pos.x, LevelObjects[i].pos.y, objectSaveData);
-			}
-			else
-			{
-				FW("        [ \"%s\", %d, %d ],", LevelObjects[i].prefab, LevelObjects[i].pos.x, LevelObjects[i].pos.y);
-			}
+			char objectSaveData[2048];
+			SerializeObject(objectSaveData, TRANSFORM | STRING_STORAGE | WAYPOINTS, LevelObjects[i].objectID);
+			FW("        [ \"%s\", %s ],", LevelObjects[i].prefab, objectSaveData);
 		}
 
 		FW("    ],");

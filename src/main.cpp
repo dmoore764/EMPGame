@@ -12,6 +12,7 @@ struct level_objects
 {
 	char *prefab;
 	ivec2 pos;
+	int layer;
 	int objectID;
 };
 
@@ -475,7 +476,7 @@ int main(int arg_count, char **args)
 				else
 				{
 					SetShader("basic_tex_color");
-                    DrawSprite(obj->sprite->name, obj->sprite->color, ToScreen(obj->tx->pos.x, obj->tx->pos.y), obj->tx->rot, {obj->tx->scale.x * 0x200, obj->tx->scale.y * 0x200});
+                    DrawSprite(obj->sprite->name, obj->sprite->color, ToScreen(obj->tx->pos, obj->tx->layer), obj->tx->rot, {obj->tx->scale.x * 0x200, obj->tx->scale.y * 0x200});
 				}
 			}
 

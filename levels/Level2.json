@@ -4,8 +4,9 @@
         [[2070241,2087648],[2070241,2087648]],
 	],
     Objects: [
-        [ "girl", 2045952, 2064896 ],
-        [ "door", 2082816, 2093056, [ "Level_1.json" ] ],
+        [ "girl", { transform : { pos : [ 2051072, 2088448 ], rot : 0.000000, scale : [ 1.000000, 1.000000 ], layer : 0,  },  },  ],
+        [ "door", { string_storage : { string : "(null)" }, transform : { pos : [ 2051584, 2088448 ], rot : 0.000000, scale : [ 1.000000, 1.000000 ], layer : 0,  },  },  ],
+        [ "door", { string_storage : { string : "Level_1.json#whatever" }, transform : { pos : [ 2083328, 2093056 ], rot : 0.000000, scale : [ 1.000000, 1.000000 ], layer : 0,  },  },  ],
     ],
     TileX: 497,
     TileY: 503,

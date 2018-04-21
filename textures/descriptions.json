@@ -12,6 +12,10 @@
 		}
 	},
 	{
+		sprite : "LeaningRectangle",
+		origin : [14, 57],
+	},
+	{
 		sprite : "Door",
 		origin : [10, 25],
 	},
